@@ -4,6 +4,7 @@ from aerich import Command
 from fastapi import FastAPI
 from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
+from tortoise import connections
 from tortoise.expressions import Q
 
 from app.api import api_router
@@ -174,6 +175,81 @@ async def init_menus():
             keepalive=False,
             redirect="",
         )
+    await ensure_redbook_menus()
+
+
+async def ensure_redbook_menus():
+    parent_menu = await Menu.filter(path="/redbook", parent_id=0).first()
+    if not parent_menu:
+        parent_menu = await Menu.create(
+            menu_type=MenuType.CATALOG,
+            name="红书数据看板",
+            path="/redbook",
+            order=3,
+            parent_id=0,
+            icon="material-symbols:dashboard-customize-outline",
+            is_hidden=False,
+            component="Layout",
+            keepalive=False,
+            redirect="/redbook/dashboard-overview",
+        )
+
+    children = [
+        {
+            "name": "总览看板",
+            "path": "dashboard-overview",
+            "order": 1,
+            "icon": "material-symbols:monitoring-outline",
+            "component": "/redbook/dashboard/overview",
+        },
+        {
+            "name": "项目管理",
+            "path": "project",
+            "order": 2,
+            "icon": "material-symbols:folder-managed-outline",
+            "component": "/redbook/project",
+        },
+        {
+            "name": "数据上传",
+            "path": "upload",
+            "order": 3,
+            "icon": "material-symbols:upload-file-outline",
+            "component": "/redbook/upload",
+        },
+        {
+            "name": "解析记录",
+            "path": "parse-record",
+            "order": 4,
+            "icon": "material-symbols:article-outline",
+            "component": "/redbook/parse-record",
+        },
+        {
+            "name": "笔记映射",
+            "path": "note-mapping",
+            "order": 5,
+            "icon": "material-symbols:edit-note-outline",
+            "component": "/redbook/note-mapping",
+        },
+        {
+            "name": "任务映射",
+            "path": "task-mapping",
+            "order": 6,
+            "icon": "material-symbols:account-tree-outline",
+            "component": "/redbook/task-mapping",
+        },
+    ]
+
+    for item in children:
+        exists = await Menu.filter(path=item["path"], parent_id=parent_menu.id).exists()
+        if exists:
+            continue
+        await Menu.create(
+            menu_type=MenuType.MENU,
+            parent_id=parent_menu.id,
+            is_hidden=False,
+            keepalive=False,
+            **item,
+        )
 
 
 async def init_apis():
@@ -198,6 +274,116 @@ async def init_db():
         await command.init_db(safe=True)
 
     await command.upgrade(run_in_transaction=True)
+    await ensure_redbook_schema()
+
+
+async def ensure_redbook_schema():
+    """Keep mounted SQLite files compatible with newly added redbook columns."""
+    conn = connections.get("sqlite")
+    await conn.execute_script(
+        """
+        CREATE TABLE IF NOT EXISTS redbook_keyword_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            project_id BIGINT NOT NULL,
+            keyword VARCHAR(128) NOT NULL,
+            product_category VARCHAR(128),
+            keyword_type VARCHAR(64) NOT NULL DEFAULT 'custom',
+            is_brand_keyword BOOL NOT NULL DEFAULT 0,
+            is_product_keyword BOOL NOT NULL DEFAULT 0,
+            is_competitor_keyword BOOL NOT NULL DEFAULT 0,
+            is_default_selected BOOL NOT NULL DEFAULT 0,
+            is_kpi_keyword BOOL NOT NULL DEFAULT 0,
+            kpi_name VARCHAR(128),
+            sort_order INT NOT NULL DEFAULT 0,
+            enabled BOOL NOT NULL DEFAULT 1
+        )
+        """
+    )
+    await conn.execute_script(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uid_redbook_keyword_config_project_keyword "
+        "ON redbook_keyword_config (project_id, keyword)"
+    )
+    await conn.execute_script(
+        """
+        CREATE TABLE IF NOT EXISTS redbook_raw_keyword_search (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            project_id BIGINT NOT NULL,
+            source_file_id BIGINT NOT NULL,
+            row_number INT,
+            column_number INT,
+            stat_date DATE,
+            keyword VARCHAR(128) NOT NULL,
+            product_category VARCHAR(128),
+            keyword_type VARCHAR(64) NOT NULL DEFAULT 'custom',
+            raw_value VARCHAR(64),
+            search_index DECIMAL(20,6),
+            is_less_than_threshold BOOL NOT NULL DEFAULT 0,
+            threshold_value DECIMAL(20,6),
+            estimate_value DECIMAL(20,6),
+            raw_json JSON
+        )
+        """
+    )
+    columns_by_table = {
+        "redbook_raw_pgy": {
+            "task_id": "VARCHAR(128)",
+        },
+        "redbook_fact_task_daily": {
+            "like_uv": "BIGINT",
+            "collect_uv": "BIGINT",
+            "comment_uv": "BIGINT",
+            "share_uv": "BIGINT",
+            "content_interaction_rate": "DECIMAL(20,8)",
+            "new_customer_visit_uv": "BIGINT",
+            "shop_follow_uv": "BIGINT",
+            "shop_member_uv": "BIGINT",
+            "new_customer_deal_uv": "BIGINT",
+            "order_product_new_customer_gmv": "DECIMAL(20,6)",
+            "presale_deposit_gmv": "DECIMAL(20,6)",
+            "presale_estimated_gmv": "DECIMAL(20,6)",
+            "presale_deposit_uv": "BIGINT",
+        },
+        "redbook_mart_project_daily": {
+            "pgy_exposure": "BIGINT",
+            "pgy_read_count": "BIGINT",
+            "pgy_interaction_count": "BIGINT",
+            "task_like_uv": "BIGINT",
+            "task_collect_uv": "BIGINT",
+            "task_comment_uv": "BIGINT",
+            "task_share_uv": "BIGINT",
+            "task_interaction_uv": "BIGINT",
+            "task_new_customer_visit_uv": "BIGINT",
+            "task_shop_follow_uv": "BIGINT",
+            "task_shop_member_uv": "BIGINT",
+            "task_new_customer_deal_uv": "BIGINT",
+            "task_order_product_gmv": "DECIMAL(20,6)",
+            "task_non_order_product_gmv": "DECIMAL(20,6)",
+            "task_order_product_new_customer_gmv": "DECIMAL(20,6)",
+            "task_presale_deposit_gmv": "DECIMAL(20,6)",
+            "task_presale_estimated_gmv": "DECIMAL(20,6)",
+            "task_presale_deposit_uv": "BIGINT",
+        },
+    }
+    for table, columns in columns_by_table.items():
+        table_exists = await conn.execute_query_dict(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            [table],
+        )
+        if not table_exists:
+            continue
+        current_columns = {
+            item["name"]
+            for item in await conn.execute_query_dict(f"PRAGMA table_info({table})")
+        }
+        for column_name, column_type in columns.items():
+            if column_name in current_columns:
+                continue
+            await conn.execute_script(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_type}")
+            logger.info(f"added missing redbook column {table}.{column_name}")
 
 
 async def init_roles():

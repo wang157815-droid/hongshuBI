@@ -1,1 +1,12 @@
 web/node_modules
+.git
+.uv-cache
+.uv-python
+.venv
+__pycache__
+*.pyc
+app/**/__pycache__
+storage
+doce
+web/dist
+web/.vite

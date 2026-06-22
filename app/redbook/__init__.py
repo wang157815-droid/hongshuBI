@@ -1,0 +1,1 @@
+"""Redbook marketing data module."""

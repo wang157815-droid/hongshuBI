@@ -9,6 +9,8 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi==0.111.0",
     "tortoise-orm==0.23.0",
+    "pandas==2.2.3",
+    "openpyxl==3.1.5",
     "pydantic==2.10.5",
     "email-validator==2.2.0",
     "passlib==1.7.4",
@@ -64,7 +66,6 @@ dependencies = [
     "typer==0.15.1",
     "typing-extensions==4.12.2",
     "ujson==5.10.0",
-    "uvloop==0.21.0",
     "watchfiles==1.0.4",
     "websockets==14.1",
     "pyproject-toml>=0.1.0",

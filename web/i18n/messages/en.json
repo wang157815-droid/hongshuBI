@@ -1,6 +1,6 @@
 {
   "lang": "English",
-  "app_name": "Vue FastAPI Admin",
+  "app_name": "红书投放看板",
   "header": {
     "label_profile": "Profile",
     "label_logout": "Logout",

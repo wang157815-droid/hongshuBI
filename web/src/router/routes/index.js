@@ -6,13 +6,14 @@ const Layout = () => import('@/layout/index.vue')
 export const basicRoutes = [
   {
     path: '/',
-    redirect: '/workbench', // 默认跳转到首页
+    redirect: '/redbook/dashboard-overview', // 默认跳转到红书总览
     meta: { order: 0 },
   },
   {
     name: t('views.workbench.label_workbench'),
     path: '/workbench',
     component: Layout,
+    isHidden: true,
     children: [
       {
         path: '',
@@ -50,6 +51,7 @@ export const basicRoutes = [
     name: 'ErrorPage',
     path: '/error-page',
     component: Layout,
+    isHidden: true,
     redirect: '/error-page/404',
     meta: {
       title: t('views.errors.label_error'),

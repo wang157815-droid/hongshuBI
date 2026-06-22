@@ -1,9 +1,20 @@
 import asyncio
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
 from tortoise import fields, models
 
 from app.settings import settings
+
+
+def serialize_model_value(value):
+    if isinstance(value, datetime):
+        return value.strftime(settings.DATETIME_FORMAT)
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    return value
 
 
 class BaseModel(models.Model):
@@ -17,9 +28,7 @@ class BaseModel(models.Model):
         for field in self._meta.db_fields:
             if field not in exclude_fields:
                 value = getattr(self, field)
-                if isinstance(value, datetime):
-                    value = value.strftime(settings.DATETIME_FORMAT)
-                d[field] = value
+                d[field] = serialize_model_value(value)
 
         if m2m:
             tasks = [
@@ -41,10 +50,7 @@ class BaseModel(models.Model):
             formatted_value = {}
             for k, v in value.items():
                 if k not in exclude_fields:
-                    if isinstance(v, datetime):
-                        formatted_value[k] = v.strftime(settings.DATETIME_FORMAT)
-                    else:
-                        formatted_value[k] = v
+                    formatted_value[k] = serialize_model_value(v)
             formatted_values.append(formatted_value)
 
         return field, formatted_values

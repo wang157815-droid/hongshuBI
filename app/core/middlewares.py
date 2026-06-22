@@ -60,15 +60,32 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
         for key, value in request.query_params.items():
             args[key] = value
 
-        # 获取请求体
+        # Read lightweight request metadata only; never read multipart file bodies here.
         if request.method in ["POST", "PUT", "PATCH"]:
+            content_type = request.headers.get("content-type", "").lower()
+            if "multipart/form-data" in content_type:
+                args["_content_type"] = "multipart/form-data"
+                args["_body"] = "omitted"
+                return args
             try:
-                body = await request.json()
-                args.update(body)
-            except json.JSONDecodeError:
+                if "application/json" in content_type:
+                    body = await request.json()
+                    if isinstance(body, dict):
+                        args.update(body)
+                    else:
+                        args["_body"] = body
+                    return args
+                if "application/x-www-form-urlencoded" not in content_type:
+                    return args
+
+                body = await request.form()
+                for k, v in body.items():
+                    args[k] = v
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
+            except Exception:
                 try:
                     body = await request.form()
-                    # args.update(body)
                     for k, v in body.items():
                         if hasattr(v, "filename"):  # 文件上传行为
                             args[k] = v.filename

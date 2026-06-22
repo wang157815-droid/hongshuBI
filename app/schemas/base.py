@@ -1,5 +1,6 @@
 from typing import Any, Optional
 
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 
@@ -13,7 +14,7 @@ class Success(JSONResponse):
     ):
         content = {"code": code, "msg": msg, "data": data}
         content.update(kwargs)
-        super().__init__(content=content, status_code=code)
+        super().__init__(content=jsonable_encoder(content), status_code=code)
 
 
 class Fail(JSONResponse):
@@ -26,7 +27,7 @@ class Fail(JSONResponse):
     ):
         content = {"code": code, "msg": msg, "data": data}
         content.update(kwargs)
-        super().__init__(content=content, status_code=code)
+        super().__init__(content=jsonable_encoder(content), status_code=code)
 
 
 class SuccessExtra(JSONResponse):
@@ -49,4 +50,4 @@ class SuccessExtra(JSONResponse):
             "page_size": page_size,
         }
         content.update(kwargs)
-        super().__init__(content=content, status_code=code)
+        super().__init__(content=jsonable_encoder(content), status_code=code)
