@@ -22,7 +22,6 @@ const $table = ref(null)
 const queryItems = ref({})
 const projectOptions = ref([])
 const uploadLoading = ref(false)
-const fileList = ref([])
 const selectedFile = ref(null)
 const fileInputRef = ref(null)
 const uploadForm = ref({
@@ -99,7 +98,7 @@ async function handleUpload() {
     window.$message?.warning('请选择项目')
     return
   }
-  const file = selectedFile.value || fileList.value[0]?.file || fileList.value[0]?.rawFile
+  const file = selectedFile.value
   if (!file) {
     fileInputRef.value?.click()
     return
@@ -114,7 +113,6 @@ async function handleUpload() {
   try {
     const res = await api.uploadRedbookFile(data)
     const uploadedFile = res.data || {}
-    fileList.value = []
     selectedFile.value = null
     queryItems.value.project_id = uploadForm.value.project_id
     $table.value?.handleSearch()
@@ -139,24 +137,10 @@ async function handleUpload() {
   }
 }
 
-function handleUploadChange(options) {
-  fileList.value = options.fileList || []
-  selectedFile.value = options.file?.file || fileList.value[0]?.file || null
-}
-
 async function handleNativeFileChange(event) {
   const file = event.target.files?.[0]
   if (!file) return
   selectedFile.value = file
-  fileList.value = [
-    {
-      id: `native-${Date.now()}`,
-      name: file.name,
-      status: 'pending',
-      percentage: 0,
-      file,
-    },
-  ]
   event.target.value = ''
   await handleUpload()
 }
@@ -175,7 +159,7 @@ async function handleDelete(row) {
 
 <template>
   <CommonPage show-footer title="红书数据上传">
-    <NGrid :cols="4" :x-gap="16" responsive="screen">
+    <NGrid :cols="4" :x-gap="16" responsive="screen" class="mb-24">
       <NGi>
         <NFormItem label="项目">
           <NSelect
@@ -213,19 +197,6 @@ async function handleDelete(row) {
         </NButton>
       </NGi>
     </NGrid>
-
-    <NUpload
-      v-model:file-list="fileList"
-      :default-upload="false"
-      :max="1"
-      accept=".xlsx,.xls,.csv"
-      class="mb-24"
-      @change="handleUploadChange"
-    >
-      <NUploadDragger>
-        <div text-14>点击或拖拽 Excel/CSV 文件到此处</div>
-      </NUploadDragger>
-    </NUpload>
 
     <CrudTable
       ref="$table"
