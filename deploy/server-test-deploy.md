@@ -19,10 +19,12 @@ mkdir -p docker-data/storage/redbook_uploads
 docker compose build
 ```
 
-如果服务器上的默认 pip 源仍然下载失败，可以临时指定官方 PyPI 重建：
+默认构建只使用阿里云 PyPI 镜像，避免服务器访问 `files.pythonhosted.org` 超时。
+
+如果国内镜像仍然缺包，可以临时指定官方 PyPI 作为兜底源重建：
 
 ```bash
-docker compose build --build-arg PIP_INDEX_URL=https://pypi.org/simple --build-arg PIP_EXTRA_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+docker compose build --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ --build-arg PIP_EXTRA_INDEX_URL=https://pypi.org/simple --build-arg PIP_DEFAULT_TIMEOUT=180 --build-arg PIP_RETRIES=20
 ```
 
 ```bash

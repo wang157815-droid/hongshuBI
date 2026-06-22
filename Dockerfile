@@ -13,7 +13,9 @@ FROM python:3.11-slim-bullseye
 
 WORKDIR /opt/vue-fastapi-admin
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-ARG PIP_EXTRA_INDEX_URL=https://pypi.org/simple
+ARG PIP_EXTRA_INDEX_URL=
+ARG PIP_DEFAULT_TIMEOUT=120
+ARG PIP_RETRIES=10
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=core-apt \
     --mount=type=cache,target=/var/lib/apt,sharing=locked,id=core-apt \
@@ -26,7 +28,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=core-apt \
 
 COPY /requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip,id=core-pip \
-    pip install -r requirements.txt --index-url "$PIP_INDEX_URL" --extra-index-url "$PIP_EXTRA_INDEX_URL"
+    if [ -n "$PIP_EXTRA_INDEX_URL" ]; then \
+      pip install -r requirements.txt --index-url "$PIP_INDEX_URL" --extra-index-url "$PIP_EXTRA_INDEX_URL" --default-timeout "$PIP_DEFAULT_TIMEOUT" --retries "$PIP_RETRIES"; \
+    else \
+      pip install -r requirements.txt --index-url "$PIP_INDEX_URL" --default-timeout "$PIP_DEFAULT_TIMEOUT" --retries "$PIP_RETRIES"; \
+    fi
 
 ADD . .
 COPY /deploy/entrypoint.sh .
