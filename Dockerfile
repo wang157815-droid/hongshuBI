@@ -12,6 +12,8 @@ RUN pnpm run build
 FROM python:3.11-slim-bullseye
 
 WORKDIR /opt/vue-fastapi-admin
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_EXTRA_INDEX_URL=https://pypi.org/simple
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=core-apt \
     --mount=type=cache,target=/var/lib/apt,sharing=locked,id=core-apt \
@@ -24,7 +26,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=core-apt \
 
 COPY /requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip,id=core-pip \
-    pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+    pip install -r requirements.txt --index-url "$PIP_INDEX_URL" --extra-index-url "$PIP_EXTRA_INDEX_URL"
 
 ADD . .
 COPY /deploy/entrypoint.sh .

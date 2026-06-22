@@ -19,6 +19,12 @@ mkdir -p docker-data/storage/redbook_uploads
 docker compose build
 ```
 
+如果服务器上的默认 pip 源仍然下载失败，可以临时指定官方 PyPI 重建：
+
+```bash
+docker compose build --build-arg PIP_INDEX_URL=https://pypi.org/simple --build-arg PIP_EXTRA_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+```
+
 ```bash
 docker compose up -d
 ```
