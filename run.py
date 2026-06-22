@@ -1,5 +1,12 @@
+import os
+
 import uvicorn
 from uvicorn.config import LOGGING_CONFIG
+
+
+def env_flag(name: str, default: str = "true") -> bool:
+    return os.getenv(name, default).lower() in {"1", "true", "yes", "on"}
+
 
 if __name__ == "__main__":
     # 修改默认日志配置
@@ -10,4 +17,10 @@ if __name__ == "__main__":
     ] = '%(asctime)s - %(levelname)s - %(client_addr)s - "%(request_line)s" %(status_code)s'
     LOGGING_CONFIG["formatters"]["access"]["datefmt"] = "%Y-%m-%d %H:%M:%S"
 
-    uvicorn.run("app:app", host="0.0.0.0", port=9999, reload=True, log_config=LOGGING_CONFIG)
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=int(os.getenv("APP_PORT", "9999")),
+        reload=env_flag("UVICORN_RELOAD", "true"),
+        log_config=LOGGING_CONFIG,
+    )

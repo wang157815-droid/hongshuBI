@@ -7,6 +7,8 @@ __pycache__
 *.pyc
 app/**/__pycache__
 storage
+docker-data
+app/logs
 doce
 web/dist
 web/.vite

@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     PROJECT_ROOT: str = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
     BASE_DIR: str = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir))
     LOGS_ROOT: str = os.path.join(BASE_DIR, "app/logs")
+    SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH", os.path.join(BASE_DIR, "db.sqlite3"))
+    REDBOOK_UPLOAD_ROOT: str = os.getenv(
+        "REDBOOK_UPLOAD_ROOT",
+        os.path.join(BASE_DIR, "storage", "redbook_uploads"),
+    )
     SECRET_KEY: str = "3488a63e1765035d386f05409663f55c83bfae3b3c61a932744b20ad14244dcf"  # openssl rand -hex 32
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 day
@@ -28,7 +33,7 @@ class Settings(BaseSettings):
             # SQLite configuration
             "sqlite": {
                 "engine": "tortoise.backends.sqlite",
-                "credentials": {"file_path": f"{BASE_DIR}/db.sqlite3"},  # Path to SQLite database file
+                "credentials": {"file_path": SQLITE_DB_PATH},  # Path to SQLite database file
             },
             # MySQL/MariaDB configuration
             # Install with: tortoise-orm[asyncmy]

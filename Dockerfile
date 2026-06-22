@@ -31,8 +31,8 @@ COPY /deploy/entrypoint.sh .
 
 COPY --from=web /opt/vue-fastapi-admin/web/dist /opt/vue-fastapi-admin/web/dist
 ADD /deploy/web.conf /etc/nginx/sites-available/web.conf
-RUN rm -f /etc/nginx/sites-enabled/default \ 
-    && ln -s /etc/nginx/sites-available/web.conf /etc/nginx/sites-enabled/ 
+RUN rm -f /etc/nginx/sites-enabled/default \
+    && ln -sf /etc/nginx/sites-available/web.conf /etc/nginx/sites-enabled/web.conf
 
 ENV LANG=zh_CN.UTF-8
 EXPOSE 80

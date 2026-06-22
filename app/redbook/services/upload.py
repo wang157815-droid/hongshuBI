@@ -8,7 +8,7 @@ from fastapi import UploadFile
 from app.models.redbook import RedbookFileUpload
 from app.settings import settings
 
-UPLOAD_ROOT = Path(settings.BASE_DIR) / "storage" / "redbook_uploads"
+UPLOAD_ROOT = Path(settings.REDBOOK_UPLOAD_ROOT)
 
 
 async def save_upload_file(project_id: int, source_type: str, file: UploadFile, upload_user_id: int | None = None):

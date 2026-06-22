@@ -1,0 +1,19 @@
+name: redbook-dashboard
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: redbook-dashboard:sqlite-test
+    container_name: redbook-dashboard
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-80}:80"
+    environment:
+      TZ: Asia/Shanghai
+      SQLITE_DB_PATH: /data/db.sqlite3
+      REDBOOK_UPLOAD_ROOT: /data/storage/redbook_uploads
+      UVICORN_RELOAD: "false"
+    volumes:
+      - ./docker-data:/data
