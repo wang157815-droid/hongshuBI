@@ -199,7 +199,7 @@ async def ensure_redbook_menus():
             "name": "总览看板",
             "path": "dashboard-overview",
             "order": 1,
-            "icon": "material-symbols:monitoring-outline",
+            "icon": "mdi-clock-time-eight-outline",
             "component": "/redbook/dashboard/overview",
         },
         {
@@ -240,8 +240,9 @@ async def ensure_redbook_menus():
     ]
 
     for item in children:
-        exists = await Menu.filter(path=item["path"], parent_id=parent_menu.id).exists()
-        if exists:
+        menu = await Menu.filter(path=item["path"], parent_id=parent_menu.id).first()
+        if menu:
+            await menu.update_from_dict(item).save()
             continue
         await Menu.create(
             menu_type=MenuType.MENU,

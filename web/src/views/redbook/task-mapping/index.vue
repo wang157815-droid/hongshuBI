@@ -76,7 +76,7 @@ const columns = [
                 { size: 'small', type: 'error' },
                 { default: () => '删除', icon: renderIcon('material-symbols:delete-outline', { size: 16 }) }
               ),
-            default: () => '确认删除该映射吗？',
+            default: () => '确认删除该任务组吗？',
           }
         ),
       ]
@@ -161,7 +161,7 @@ function handleTaskIdChange(taskId) {
 
 async function openCreate() {
   form.value = { ...getDefaultForm(), project_id: queryItems.value.project_id || null }
-  modalTitle.value = '新建任务映射'
+  modalTitle.value = '新建任务组'
   modalVisible.value = true
   await loadPgyTaskOptions(form.value.project_id)
 }
@@ -180,7 +180,7 @@ async function openEdit(row) {
     cooperation_mode: row.cooperation_mode,
     status: row.status || 'active',
   }
-  modalTitle.value = '编辑任务映射'
+  modalTitle.value = '编辑任务组'
   modalVisible.value = true
   await loadPgyTaskOptions(row.project_id, row.task_id)
 }
@@ -210,10 +210,10 @@ async function handleDelete(id) {
 </script>
 
 <template>
-  <CommonPage show-footer title="任务映射">
+  <CommonPage show-footer title="任务列表">
     <template #action>
       <NButton type="primary" @click="openCreate">
-        <TheIcon icon="material-symbols:add" :size="18" class="mr-5" />新建映射
+        <TheIcon icon="material-symbols:add" :size="18" class="mr-5" />新建任务组
       </NButton>
     </template>
 

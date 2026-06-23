@@ -74,7 +74,7 @@ const columns = [
                 { size: 'small', type: 'error' },
                 { default: () => '删除', icon: renderIcon('material-symbols:delete-outline', { size: 16 }) }
               ),
-            default: () => '确认删除该映射吗？',
+            default: () => '确认删除该笔记吗？',
           }
         ),
       ]
@@ -113,7 +113,7 @@ async function loadProjects() {
 
 function openCreate() {
   form.value = { ...getDefaultForm(), project_id: queryItems.value.project_id || null }
-  modalTitle.value = '新建笔记映射'
+  modalTitle.value = '新建笔记'
   modalVisible.value = true
 }
 
@@ -132,7 +132,7 @@ function openEdit(row) {
     publish_date: row.publish_date,
     status: row.status || 'active',
   }
-  modalTitle.value = '编辑笔记映射'
+  modalTitle.value = '编辑笔记'
   modalVisible.value = true
 }
 
@@ -161,10 +161,10 @@ async function handleDelete(id) {
 </script>
 
 <template>
-  <CommonPage show-footer title="笔记映射">
+  <CommonPage show-footer title="笔记列表">
     <template #action>
       <NButton type="primary" @click="openCreate">
-        <TheIcon icon="material-symbols:add" :size="18" class="mr-5" />新建映射
+        <TheIcon icon="material-symbols:add" :size="18" class="mr-5" />新建笔记
       </NButton>
     </template>
 
