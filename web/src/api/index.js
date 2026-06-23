@@ -78,4 +78,11 @@ export default {
   getRedbookSearchFunnel: (params = {}) => request.get('/redbook/dashboards/search-funnel', { params }),
   getRedbookConversionFunnel: (params = {}) => request.get('/redbook/dashboards/conversion-funnel', { params }),
   getRedbookTaskPerformance: (params = {}) => request.get('/redbook/dashboards/task-performance', { params }),
+  // redbook kpis
+  getRedbookKpiMetrics: (params = {}) => request.get('/redbook/kpis/metrics', { params }),
+  getRedbookKpiConfigs: (params = {}) => request.get('/redbook/kpis/configs', { params }),
+  createRedbookKpiConfig: (data = {}) => request.post('/redbook/kpis/configs/create', data),
+  updateRedbookKpiConfig: (data = {}) => request.post('/redbook/kpis/configs/update', data),
+  deleteRedbookKpiConfig: (params = {}) => request.delete('/redbook/kpis/configs/delete', { params }),
+  getRedbookKpiProgress: (params = {}) => request.get('/redbook/kpis/progress', { params }),
 }

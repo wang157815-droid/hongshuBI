@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -51,6 +52,27 @@ class RedbookTaskMappingCreate(BaseModel):
 
 
 class RedbookTaskMappingUpdate(RedbookTaskMappingCreate):
+    id: int
+
+
+class RedbookKpiConfigCreate(BaseModel):
+    project_id: int
+    period_name: Optional[str] = None
+    kpi_code: Optional[str] = None
+    kpi_name: Optional[str] = None
+    metric_code: str
+    target_value: Optional[Decimal] = None
+    weight_score: Optional[Decimal] = 10
+    unit: Optional[str] = None
+    direction: Optional[str] = None
+    cap_at_full_score: bool = True
+    formula_version: str = "v1"
+    cost_scope: str = "exclude_service_fee"
+    status: str = "active"
+    remark: Optional[str] = None
+
+
+class RedbookKpiConfigUpdate(RedbookKpiConfigCreate):
     id: int
 
 

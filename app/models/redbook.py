@@ -144,16 +144,19 @@ class RedbookKeywordConfig(BaseModel, TimestampMixin):
 
 class RedbookKpiConfig(BaseModel, TimestampMixin):
     project_id = fields.BigIntField(description="项目ID", index=True)
+    period_name = fields.CharField(max_length=64, null=True, description="KPI周期", index=True)
     kpi_code = fields.CharField(max_length=64, description="KPI编码", index=True)
     kpi_name = fields.CharField(max_length=128, description="KPI名称")
     metric_code = fields.CharField(max_length=64, description="绑定指标")
     target_value = fields.DecimalField(max_digits=20, decimal_places=6, null=True, description="目标值")
     weight_score = fields.DecimalField(max_digits=20, decimal_places=6, null=True, description="权重分")
+    unit = fields.CharField(max_length=32, null=True, description="指标单位")
     direction = fields.CharField(max_length=32, default="higher_better", description="方向")
     cap_at_full_score = fields.BooleanField(default=True, description="是否封顶")
     formula_version = fields.CharField(max_length=32, default="v1", description="公式版本")
     cost_scope = fields.CharField(max_length=64, default="exclude_service_fee", description="费用口径")
     status = fields.CharField(max_length=32, default="active", description="状态", index=True)
+    remark = fields.TextField(null=True, description="备注")
 
     class Meta:
         table = "redbook_kpi_config"
@@ -456,14 +459,18 @@ class RedbookMartProjectDaily(BaseModel, TimestampMixin):
 
 class RedbookKpiResult(BaseModel, TimestampMixin):
     project_id = fields.BigIntField(description="项目ID", index=True)
+    period_name = fields.CharField(max_length=64, null=True, description="KPI周期", index=True)
     kpi_config_id = fields.BigIntField(null=True, description="KPI配置ID", index=True)
     kpi_code = fields.CharField(max_length=64, description="KPI编码", index=True)
     kpi_name = fields.CharField(max_length=128, description="KPI名称")
+    metric_code = fields.CharField(max_length=64, null=True, description="绑定指标", index=True)
     actual_value = fields.DecimalField(max_digits=20, decimal_places=6, null=True, description="实际值")
     target_value = fields.DecimalField(max_digits=20, decimal_places=6, null=True, description="目标值")
     weight_score = fields.DecimalField(max_digits=20, decimal_places=6, null=True, description="权重分")
     achievement_rate = fields.DecimalField(max_digits=20, decimal_places=8, null=True, description="达成率")
     actual_score = fields.DecimalField(max_digits=20, decimal_places=6, null=True, description="实际得分")
+    direction = fields.CharField(max_length=32, null=True, description="方向")
+    cost_scope = fields.CharField(max_length=64, null=True, description="费用口径")
     formula_version = fields.CharField(max_length=32, default="v1", description="公式版本")
     stat_date = fields.DateField(null=True, description="计算日期", index=True)
 

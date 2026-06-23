@@ -19,6 +19,7 @@ const totals = ref({})
 const xiaohongxing = ref(defaultXiaohongxing())
 const keywordSearch = ref(defaultKeywordSearch())
 const planting = ref(defaultPlanting())
+const kpiProgress = ref(defaultKpiProgress())
 const plantingCostGranularity = ref('day')
 const adEfficiencyTab = ref('cost-trend')
 const adVolumeMode = ref('clicks')
@@ -122,7 +123,14 @@ const xhxTaskGroupsWithTotal = computed(() => {
 const xhxDetailGroups = computed(() => buildXhxDetailGroups(xhxSummary.value, xhxTaskGroupsWithTotal.value[0] || {}))
 const xhxDetailActiveTab = ref('内容规划')
 const xhxSourceStatus = computed(() => xiaohongxing.value.source_status || [])
-const xhxKpis = computed(() => xiaohongxing.value.kpis || { configured: false, items: [] })
+const selectedProject = computed(() => projectOptions.value.find((item) => item.value === projectId.value) || null)
+const kpiCards = computed(() => [
+  { label: 'KPI总分', value: kpiProgress.value.total_score === null ? '-' : formatNumber(kpiProgress.value.total_score, 2), sub: `可得权重 ${formatNumber(kpiProgress.value.total_weight, 2)}` },
+  { label: '配置项', value: formatNumber(kpiProgress.value.configured_count), sub: `周期 ${kpiProgress.value.period_name || selectedProject.value?.period_name || '-'}` },
+  { label: '已达标', value: formatNumber(kpiProgress.value.achieved_count), sub: `未达标 ${formatNumber(kpiProgress.value.failed_count)}` },
+  { label: '未计分', value: formatNumber(kpiProgress.value.missing_count), sub: '无目标或数据缺失' },
+])
+const kpiWeakItems = computed(() => kpiProgress.value.weak_items || [])
 const xhxMissingMappings = computed(() => xiaohongxing.value.missing_mappings || {})
 const xhxSearchMax = computed(() =>
   Math.max(
@@ -345,12 +353,25 @@ const xhxSourceColumns = [
   { title: '最近文件', key: 'latest_file_name', minWidth: 220, ellipsis: { tooltip: true }, render: (row) => row.latest_file_name || '-' },
 ]
 
-const xhxKpiColumns = [
-  { title: 'KPI', key: 'kpi_name', minWidth: 160 },
-  { title: '实际值', key: 'actual_value', width: 120, render: (row) => formatNumber(row.actual_value, 2) },
-  { title: '目标值', key: 'target_value', width: 120, render: (row) => formatNumber(row.target_value, 2) },
+const kpiDetailColumns = [
+  { title: 'KPI', key: 'kpi_name', width: 160, ellipsis: { tooltip: true } },
+  { title: '分类', key: 'category', width: 100 },
+  { title: '来源', key: 'source', width: 120 },
+  { title: '实际值', key: 'actual_value', width: 120, render: (row) => formatKpiDisplay(row.actual_value, row.unit) },
+  { title: '目标值', key: 'target_value', width: 120, render: (row) => formatKpiDisplay(row.target_value, row.unit) },
   { title: '达成率', key: 'achievement_rate', width: 110, render: (row) => formatPercent(row.achievement_rate, 1) },
-  { title: '得分', key: 'actual_score', width: 100, render: (row) => formatNumber(row.actual_score, 2) },
+  { title: '权重', key: 'weight_score', width: 90, render: (row) => formatNumber(row.weight_score, 2) },
+  { title: '得分', key: 'actual_score', width: 90, render: (row) => formatNumber(row.actual_score, 2) },
+  { title: '方向', key: 'direction', width: 100, render: (row) => kpiDirectionLabel(row.direction) },
+  {
+    title: '状态',
+    key: 'status',
+    width: 100,
+    render(row) {
+      return h(NTag, { type: kpiStatusType(row.status), size: 'small' }, { default: () => row.status_label || '-' })
+    },
+  },
+  { title: '说明', key: 'description', minWidth: 220, ellipsis: { tooltip: true } },
 ]
 
 const keywordColumns = [
@@ -423,11 +444,30 @@ function defaultPlanting() {
   }
 }
 
+function defaultKpiProgress() {
+  return {
+    configured: false,
+    period_name: '',
+    items: [],
+    weak_items: [],
+    configured_count: 0,
+    scored_count: 0,
+    achieved_count: 0,
+    failed_count: 0,
+    missing_count: 0,
+    total_weight: 0,
+    configured_weight: 0,
+    total_score: null,
+    score_rate: null,
+  }
+}
+
 async function loadProjects() {
   const res = await api.getRedbookProjects({ page: 1, page_size: 9999, status: 'active' })
   projectOptions.value = res.data.map((item) => ({
     label: `${item.project_name} (${item.project_code})`,
     value: item.id,
+    period_name: item.project_period,
   }))
   projectId.value = projectOptions.value[0]?.value || null
 }
@@ -457,6 +497,16 @@ function keywordSearchParams() {
   })
 }
 
+function kpiProgressParams() {
+  const selectedKeywords = keywordFilters.value.selected_keywords || []
+  return queryParams({
+    period_name: selectedProject.value?.period_name || '',
+    selected_keywords: selectedKeywords.join(','),
+    keyword: keywordFilters.value.keyword,
+    use_default_keywords: !keywordSelectionReady.value && !selectedKeywords.length ? true : null,
+  })
+}
+
 function syncKeywordDefaultSelection() {
   if (keywordSelectionReady.value) return
   const selected = keywordSearch.value.filters?.selected_keywords || []
@@ -469,16 +519,18 @@ async function handleSearch() {
   if (!projectId.value) return
   loading.value = true
   try {
-    const [overviewRes, plantingRes, xhxRes, keywordRes] = await Promise.all([
+    const [overviewRes, plantingRes, xhxRes, keywordRes, kpiRes] = await Promise.all([
       api.getRedbookDashboardOverview(queryParams()),
       api.getRedbookAdsEfficiency(plantingParams()),
       api.getRedbookXiaohongxingDashboard(queryParams()),
       api.getRedbookKeywordSearchDashboard(keywordSearchParams()),
+      api.getRedbookKpiProgress(kpiProgressParams()),
     ])
     totals.value = overviewRes.data.totals || {}
     planting.value = { ...defaultPlanting(), ...(plantingRes.data || {}) }
     xiaohongxing.value = { ...defaultXiaohongxing(), ...(xhxRes.data || {}) }
     keywordSearch.value = { ...defaultKeywordSearch(), ...(keywordRes.data || {}) }
+    kpiProgress.value = { ...defaultKpiProgress(), ...(kpiRes.data || {}) }
     syncKeywordDefaultSelection()
   } finally {
     loading.value = false
@@ -1406,6 +1458,24 @@ function formatPercent(value, digits = 1) {
   return `${(toNumber(value) * 100).toFixed(digits)}%`
 }
 
+function formatKpiDisplay(value, unit = '') {
+  if (value === null || value === undefined || value === '') return '-'
+  if (unit === '%') return formatPercent(value, 2)
+  if (unit === '元') return formatMoney(value)
+  return `${formatNumber(value, 2)}${unit ? ` ${unit}` : ''}`
+}
+
+function kpiStatusType(status) {
+  if (status === 'achieved') return 'success'
+  if (status === 'below_target') return 'warning'
+  if (status === 'no_target') return 'default'
+  return 'error'
+}
+
+function kpiDirectionLabel(direction) {
+  return direction === 'lower_better' ? '越低越好' : '越高越好'
+}
+
 function toOptions(values = []) {
   return values.map((value) => ({ label: value, value }))
 }
@@ -1652,34 +1722,17 @@ function breakdownMax(rows = []) {
           </section>
         </div>
 
-        <div class="dashboard-grid mb-16">
-          <section class="panel">
-            <div class="panel-head">
-              <h3>KPI进度</h3>
-              <span v-if="xhxKpis.configured" class="score-text">总得分 {{ formatNumber(xhxKpis.total_score, 2) }}</span>
-            </div>
-            <div v-if="!xhxKpis.configured" class="empty-hint">未配置 KPI，当前不写死目标值。</div>
-            <NDataTable
-              v-else
-              :columns="xhxKpiColumns"
-              :data="xhxKpis.items"
-              :pagination="false"
-              :scroll-x="620"
-            />
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <h3>数据源状态</h3>
-            </div>
-            <NDataTable
-              :columns="xhxSourceColumns"
-              :data="xhxSourceStatus"
-              :pagination="false"
-              :scroll-x="700"
-            />
-          </section>
-        </div>
+        <section class="panel mb-16">
+          <div class="panel-head">
+            <h3>数据源状态</h3>
+          </div>
+          <NDataTable
+            :columns="xhxSourceColumns"
+            :data="xhxSourceStatus"
+            :pagination="false"
+            :scroll-x="700"
+          />
+        </section>
 
         <section class="panel mb-16">
           <div class="panel-head">
@@ -1991,6 +2044,80 @@ function breakdownMax(rows = []) {
             :scroll-x="1900"
           />
         </section>
+      </NTabPane>
+
+      <NTabPane name="kpi" tab="KPI看板">
+        <NGrid :cols="4" :x-gap="12" :y-gap="12" responsive="screen" class="mb-16">
+          <NGi v-for="item in kpiCards" :key="item.label">
+            <div class="metric">
+              <div class="metric-label">{{ item.label }}</div>
+              <div class="metric-value">{{ item.value }}</div>
+              <div class="metric-sub">{{ item.sub }}</div>
+            </div>
+          </NGi>
+        </NGrid>
+
+        <div v-if="!kpiProgress.configured" class="empty-hint mb-16">
+          当前项目周期未配置 KPI。请先在左侧“KPI配置”中选择系统指标并设置目标值、权重和方向。
+        </div>
+
+        <div v-else class="kpi-layout">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>KPI达成概览</h3>
+                <span class="panel-note">按当前项目、周期和日期筛选实时计算</span>
+              </div>
+              <span class="score-text">达成率 {{ formatPercent(kpiProgress.score_rate, 1) }}</span>
+            </div>
+            <div class="kpi-score-card">
+              <div class="kpi-score-main">
+                <span>当前得分</span>
+                <strong>{{ formatNumber(kpiProgress.total_score, 2) }}</strong>
+                <em>可得权重 {{ formatNumber(kpiProgress.total_weight, 2) }} / 配置权重 {{ formatNumber(kpiProgress.configured_weight, 2) }}</em>
+              </div>
+              <div class="kpi-score-track">
+                <i :style="{ width: `${barWidth(kpiProgress.total_score, kpiProgress.total_weight)}%` }" />
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>短板项</h3>
+                <span class="panel-note">按分值缺口排序，优先处理未达标指标</span>
+              </div>
+            </div>
+            <div v-if="!kpiWeakItems.length" class="empty-chart">暂无未达标 KPI</div>
+            <div v-else class="kpi-weak-list">
+              <div v-for="item in kpiWeakItems" :key="item.id" class="kpi-weak-item">
+                <div>
+                  <strong>{{ item.kpi_name }}</strong>
+                  <span>{{ item.source }} / {{ item.category }}</span>
+                </div>
+                <em>缺口 {{ formatNumber(item.score_gap, 2) }} 分</em>
+                <i>实际 {{ formatKpiDisplay(item.actual_value, item.unit) }} / 目标 {{ formatKpiDisplay(item.target_value, item.unit) }}</i>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel kpi-detail-panel">
+            <div class="panel-head">
+              <div>
+                <h3>KPI明细</h3>
+                <span class="panel-note">实际值来自当前已完成的种草投流、小红星、红搜和融合总览看板口径</span>
+              </div>
+            </div>
+            <NDataTable
+              :loading="loading"
+              :columns="kpiDetailColumns"
+              :data="kpiProgress.items"
+              :pagination="{ pageSize: 10 }"
+              :scroll-x="1400"
+            />
+          </section>
+        </div>
       </NTabPane>
 
       <NTabPane name="combined" tab="融合总览">
@@ -2522,6 +2649,109 @@ function breakdownMax(rows = []) {
   color: var(--n-text-color-1);
   font-size: 16px;
   font-weight: 700;
+}
+
+.kpi-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, .9fr);
+  gap: 12px;
+}
+
+.kpi-detail-panel {
+  grid-column: 1 / -1;
+}
+
+.kpi-score-card {
+  display: grid;
+  gap: 14px;
+  min-height: 154px;
+  padding: 16px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 8px;
+  background: rgba(14, 165, 233, .06);
+}
+
+.kpi-score-main {
+  display: grid;
+  gap: 6px;
+}
+
+.kpi-score-main span,
+.kpi-score-main em {
+  color: var(--n-text-color-2);
+  font-size: 13px;
+}
+
+.kpi-score-main strong {
+  color: var(--n-text-color-1);
+  font-size: 34px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.kpi-score-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, .16);
+}
+
+.kpi-score-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0ea5e9, #16a34a);
+}
+
+.kpi-weak-list {
+  display: grid;
+  gap: 10px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.kpi-weak-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, .28);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, .06);
+}
+
+.kpi-weak-item strong,
+.kpi-weak-item span,
+.kpi-weak-item em,
+.kpi-weak-item i {
+  display: block;
+}
+
+.kpi-weak-item strong {
+  overflow: hidden;
+  color: var(--n-text-color-1);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kpi-weak-item span,
+.kpi-weak-item i {
+  color: var(--n-text-color-2);
+  font-size: 12px;
+}
+
+.kpi-weak-item em {
+  color: #d97706;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.kpi-weak-item i {
+  grid-column: 1 / -1;
+  font-style: normal;
 }
 
 .cost-chart-head {
@@ -3251,6 +3481,7 @@ function breakdownMax(rows = []) {
   .detail-focus-grid,
   .dashboard-grid,
   .dashboard-grid:has(.panel:nth-child(3)),
+  .kpi-layout,
   .overview-bottom-grid,
   .overview-source-grid,
   .overview-trend-summary {

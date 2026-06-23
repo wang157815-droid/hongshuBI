@@ -224,18 +224,25 @@ async def ensure_redbook_menus():
             "component": "/redbook/parse-record",
         },
         {
-            "name": "笔记映射",
+            "name": "笔记列表",
             "path": "note-mapping",
             "order": 5,
             "icon": "material-symbols:edit-note-outline",
             "component": "/redbook/note-mapping",
         },
         {
-            "name": "任务映射",
+            "name": "任务列表",
             "path": "task-mapping",
             "order": 6,
             "icon": "material-symbols:account-tree-outline",
             "component": "/redbook/task-mapping",
+        },
+        {
+            "name": "KPI配置",
+            "path": "kpi-config",
+            "order": 7,
+            "icon": "mdi-ticket-percent-outline",
+            "component": "/redbook/kpi-config",
         },
     ]
 
@@ -329,6 +336,53 @@ async def ensure_redbook_schema():
         )
         """
     )
+    await conn.execute_script(
+        """
+        CREATE TABLE IF NOT EXISTS redbook_kpi_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            project_id BIGINT NOT NULL,
+            period_name VARCHAR(64),
+            kpi_code VARCHAR(64) NOT NULL,
+            kpi_name VARCHAR(128) NOT NULL,
+            metric_code VARCHAR(64) NOT NULL,
+            target_value DECIMAL(20,6),
+            weight_score DECIMAL(20,6),
+            unit VARCHAR(32),
+            direction VARCHAR(32) NOT NULL DEFAULT 'higher_better',
+            cap_at_full_score BOOL NOT NULL DEFAULT 1,
+            formula_version VARCHAR(32) NOT NULL DEFAULT 'v1',
+            cost_scope VARCHAR(64) NOT NULL DEFAULT 'exclude_service_fee',
+            status VARCHAR(32) NOT NULL DEFAULT 'active',
+            remark TEXT
+        )
+        """
+    )
+    await conn.execute_script(
+        """
+        CREATE TABLE IF NOT EXISTS redbook_kpi_result (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            project_id BIGINT NOT NULL,
+            period_name VARCHAR(64),
+            kpi_config_id BIGINT,
+            kpi_code VARCHAR(64) NOT NULL,
+            kpi_name VARCHAR(128) NOT NULL,
+            metric_code VARCHAR(64),
+            actual_value DECIMAL(20,6),
+            target_value DECIMAL(20,6),
+            weight_score DECIMAL(20,6),
+            achievement_rate DECIMAL(20,8),
+            actual_score DECIMAL(20,6),
+            direction VARCHAR(32),
+            cost_scope VARCHAR(64),
+            formula_version VARCHAR(32) NOT NULL DEFAULT 'v1',
+            stat_date DATE
+        )
+        """
+    )
     columns_by_table = {
         "redbook_raw_pgy": {
             "task_id": "VARCHAR(128)",
@@ -367,6 +421,17 @@ async def ensure_redbook_schema():
             "task_presale_deposit_gmv": "DECIMAL(20,6)",
             "task_presale_estimated_gmv": "DECIMAL(20,6)",
             "task_presale_deposit_uv": "BIGINT",
+        },
+        "redbook_kpi_config": {
+            "period_name": "VARCHAR(64)",
+            "unit": "VARCHAR(32)",
+            "remark": "TEXT",
+        },
+        "redbook_kpi_result": {
+            "period_name": "VARCHAR(64)",
+            "metric_code": "VARCHAR(64)",
+            "direction": "VARCHAR(32)",
+            "cost_scope": "VARCHAR(64)",
         },
     }
     for table, columns in columns_by_table.items():
