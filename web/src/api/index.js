@@ -1,5 +1,8 @@
 import { request } from '@/utils'
 
+const getWithRepeatedParams = (url, params = {}) =>
+  request.get(url, { params, paramsSerializer: { indexes: null } })
+
 export default {
   login: (data) => request.post('/base/access_token', data, { noNeedToken: true }),
   getUserInfo: () => request.get('/base/userinfo'),
@@ -73,11 +76,11 @@ export default {
   rebuildRedbookMarts: (data = {}) => request.post('/redbook/rebuild/marts', data),
   rebuildRedbookAll: (data = {}) => request.post('/redbook/rebuild/all', data),
   getRedbookProductOptions: (params = {}) => request.get('/redbook/dashboards/product-options', { params }),
-  getRedbookTaskGroupOptions: (params = {}) => request.get('/redbook/dashboards/task-group-options', { params }),
-  getRedbookDashboardOverview: (params = {}) => request.get('/redbook/dashboards/overview', { params }),
-  getRedbookXiaohongxingDashboard: (params = {}) => request.get('/redbook/dashboards/xiaohongxing', { params }),
-  getRedbookKeywordSearchDashboard: (params = {}) => request.get('/redbook/dashboards/keyword-search', { params }),
-  getRedbookAdsEfficiency: (params = {}) => request.get('/redbook/dashboards/ads-efficiency', { params }),
+  getRedbookTaskGroupOptions: (params = {}) => getWithRepeatedParams('/redbook/dashboards/task-group-options', params),
+  getRedbookDashboardOverview: (params = {}) => getWithRepeatedParams('/redbook/dashboards/overview', params),
+  getRedbookXiaohongxingDashboard: (params = {}) => getWithRepeatedParams('/redbook/dashboards/xiaohongxing', params),
+  getRedbookKeywordSearchDashboard: (params = {}) => getWithRepeatedParams('/redbook/dashboards/keyword-search', params),
+  getRedbookAdsEfficiency: (params = {}) => getWithRepeatedParams('/redbook/dashboards/ads-efficiency', params),
   getRedbookSearchFunnel: (params = {}) => request.get('/redbook/dashboards/search-funnel', { params }),
   getRedbookConversionFunnel: (params = {}) => request.get('/redbook/dashboards/conversion-funnel', { params }),
   getRedbookTaskPerformance: (params = {}) => request.get('/redbook/dashboards/task-performance', { params }),
@@ -87,5 +90,5 @@ export default {
   createRedbookKpiConfig: (data = {}) => request.post('/redbook/kpis/configs/create', data),
   updateRedbookKpiConfig: (data = {}) => request.post('/redbook/kpis/configs/update', data),
   deleteRedbookKpiConfig: (params = {}) => request.delete('/redbook/kpis/configs/delete', { params }),
-  getRedbookKpiProgress: (params = {}) => request.get('/redbook/kpis/progress', { params }),
+  getRedbookKpiProgress: (params = {}) => getWithRepeatedParams('/redbook/kpis/progress', params),
 }

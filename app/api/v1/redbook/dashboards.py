@@ -210,6 +210,13 @@ def as_product_filter_set(product_filter):
     return {normalized_option(value) for value in values if normalized_option(value)}
 
 
+def merge_product_filters(product_category="", product_categories=None):
+    values = list(product_categories or [])
+    if normalized_option(product_category):
+        values.append(product_category)
+    return sorted(as_product_filter_set(values))
+
+
 def product_matches(value, product_filter):
     candidate = normalized_option(value)
     product_values = as_product_filter_set(product_filter)
@@ -258,23 +265,23 @@ def add_product_option(options, value, source):
         options[label].add(source)
 
 
-async def resolve_product_filter_values(project_id: int, product_category: str):
-    selected = normalized_option(product_category)
-    if not selected:
+async def resolve_product_filter_values(project_id: int, product_category):
+    selected_products = as_product_filter_set(product_category)
+    if not selected_products:
         return set()
 
     pgy_rows = await RedbookRawPgy.filter(project_id=project_id).values("spu_name", "note_id")
     note_mapping_rows = await RedbookNoteMapping.filter(project_id=project_id).values("product_category", "note_id")
-    values = {selected}
+    values = set(selected_products)
     related_note_ids = {
         normalized_option(row.get("note_id"))
         for row in pgy_rows
-        if normalized_option(row.get("spu_name")) == selected and normalized_option(row.get("note_id"))
+        if normalized_option(row.get("spu_name")) in selected_products and normalized_option(row.get("note_id"))
     }
     related_note_ids.update(
         normalized_option(row.get("note_id"))
         for row in note_mapping_rows
-        if normalized_option(row.get("product_category")) == selected and normalized_option(row.get("note_id"))
+        if normalized_option(row.get("product_category")) in selected_products and normalized_option(row.get("note_id"))
     )
     for row in pgy_rows:
         if normalized_option(row.get("note_id")) in related_note_ids:
@@ -380,7 +387,7 @@ async def build_planting_dashboard(
     project_id: int,
     date_start: date | None,
     date_end: date | None,
-    product_category: str,
+    product_category: str | list[str],
     blogger_type: str,
     note_type: str,
     content_direction: str,
@@ -1131,7 +1138,7 @@ async def build_task_groups(
     project_id: int,
     date_start: date | None,
     date_end: date | None,
-    product_category: str = "",
+    product_category: str | list[str] = "",
     task_id: str = "",
 ):
     await ensure_dashboard_data(project_id, date_start, date_end, RedbookFactTaskDaily)
@@ -1346,10 +1353,10 @@ async def build_product_options(project_id: int):
     ]
 
 
-async def build_task_group_options(project_id: int, product_category: str = ""):
+async def build_task_group_options(project_id: int, product_category=None):
     await ensure_dashboard_data(project_id, None, None, RedbookFactTaskDaily)
-    selected_product = normalized_option(product_category)
-    product_filter = await resolve_product_filter_values(project_id, selected_product)
+    selected_products = as_product_filter_set(product_category)
+    product_filter = await resolve_product_filter_values(project_id, selected_products)
     fact_rows = await RedbookFactTaskDaily.filter(project_id=project_id).values("task_id", "order_id")
     fact_task_ids = {
         normalized_option(row.get("task_id")) for row in fact_rows if normalized_option(row.get("task_id"))
@@ -1372,7 +1379,7 @@ async def build_task_group_options(project_id: int, product_category: str = ""):
         order_id = normalized_option(row.get("order_id"))
         if task_id not in fact_task_ids and order_id not in fact_order_ids:
             continue
-        if selected_product and not product_matches(row.get("product_category"), product_filter):
+        if selected_products and not product_matches(row.get("product_category"), product_filter):
             continue
         task_name = normalized_option(row.get("task_name")) or task_id
         current = options.get(task_id)
@@ -1430,7 +1437,7 @@ async def build_xiaohongxing_dashboard_payload(
     project_id: int,
     date_start: date | None,
     date_end: date | None,
-    product_category: str = "",
+    product_category: str | list[str] = "",
     task_id: str = "",
 ):
     if product_category or task_id:
@@ -1465,8 +1472,10 @@ async def product_options(project_id: int = Query(...)):
 async def task_group_options(
     project_id: int = Query(...),
     product_category: str = Query(""),
+    product_categories: list[str] | None = Query(None),
 ):
-    return Success(data=await build_task_group_options(project_id, product_category))
+    product_filter = merge_product_filters(product_category, product_categories)
+    return Success(data=await build_task_group_options(project_id, product_filter))
 
 
 @router.get("/keyword-search", summary="Redbook keyword search dashboard")
@@ -1496,10 +1505,12 @@ async def xiaohongxing_dashboard(
     date_start: date | None = Query(None),
     date_end: date | None = Query(None),
     product_category: str = Query(""),
+    product_categories: list[str] | None = Query(None),
     task_id: str = Query(""),
 ):
+    product_filter = merge_product_filters(product_category, product_categories)
     return Success(
-        data=await build_xiaohongxing_dashboard_payload(project_id, date_start, date_end, product_category, task_id)
+        data=await build_xiaohongxing_dashboard_payload(project_id, date_start, date_end, product_filter, task_id)
     )
 
 
@@ -1509,14 +1520,16 @@ async def overview(
     date_start: date | None = Query(None),
     date_end: date | None = Query(None),
     product_category: str = Query(""),
+    product_categories: list[str] | None = Query(None),
     task_id: str = Query(""),
 ):
-    if product_category or task_id:
+    product_filter = merge_product_filters(product_category, product_categories)
+    if product_filter or task_id:
         payload = await build_xiaohongxing_dashboard_payload(
             project_id,
             date_start,
             date_end,
-            product_category,
+            product_filter,
             task_id,
         )
         summary = payload["summary"]
@@ -1563,6 +1576,7 @@ async def ads_efficiency(
     date_start: date | None = Query(None),
     date_end: date | None = Query(None),
     product_category: str = Query(""),
+    product_categories: list[str] | None = Query(None),
     blogger_type: str = Query(""),
     note_type: str = Query(""),
     content_direction: str = Query(""),
@@ -1570,12 +1584,13 @@ async def ads_efficiency(
     task_id: str = Query(""),
 ):
     await ensure_dashboard_data(project_id, date_start, date_end, RedbookFactNoteDaily)
+    product_filter = merge_product_filters(product_category, product_categories)
     return Success(
         data=await build_planting_dashboard(
             project_id=project_id,
             date_start=date_start,
             date_end=date_end,
-            product_category=product_category,
+            product_category=product_filter,
             blogger_type=blogger_type,
             note_type=note_type,
             content_direction=content_direction,

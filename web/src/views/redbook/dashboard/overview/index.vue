@@ -1,5 +1,5 @@
 <script setup>
-import { computed, h, onMounted, ref, watch } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NTag } from 'naive-ui'
 
 import api from '@/api'
@@ -9,11 +9,15 @@ import { formatMoney, formatNumber } from '../../constants'
 
 defineOptions({ name: 'RedbookDashboardOverview' })
 
+const DASHBOARD_FILTER_STORAGE_KEY = 'redbook-dashboard-overview-filters'
+const DASHBOARD_TABS = new Set(['keyword-search', 'xiaohongxing', 'planting', 'kpi', 'combined'])
+let restoringDashboardFilters = false
+
 const activeTab = ref('combined')
 const projectOptions = ref([])
 const projectId = ref(null)
 const productOptions = ref([])
-const productCategory = ref(null)
+const productCategories = ref([])
 const productLoading = ref(false)
 const taskGroupOptions = ref([])
 const taskGroupId = ref(null)
@@ -399,23 +403,101 @@ const keywordColumns = [
 ]
 
 onMounted(async () => {
-  await loadProjects()
+  await restoreDashboardFilters()
   await handleSearch()
 })
 
-watch(projectId, () => {
-  productCategory.value = null
+onBeforeUnmount(persistDashboardFilters)
+
+watch(projectId, async () => {
+  if (restoringDashboardFilters) return
+  productCategories.value = []
   taskGroupId.value = null
   taskGroupOptions.value = []
-  loadProductOptions()
+  await loadProductOptions()
   keywordSelectionReady.value = false
   keywordFilters.value.selected_keywords = []
+  persistDashboardFilters()
 })
 
-watch(productCategory, () => {
+watch(productCategories, async () => {
+  if (restoringDashboardFilters) return
   taskGroupId.value = null
-  loadTaskGroupOptions()
-})
+  await loadTaskGroupOptions()
+  persistDashboardFilters()
+}, { deep: true })
+
+watch(activeTab, persistDashboardFilters)
+watch(taskGroupId, persistDashboardFilters)
+watch(dateRange, persistDashboardFilters, { deep: true })
+watch(keywordFilters, persistDashboardFilters, { deep: true })
+watch(plantingFilters, persistDashboardFilters, { deep: true })
+
+function readDashboardFilters() {
+  try {
+    return JSON.parse(window.sessionStorage.getItem(DASHBOARD_FILTER_STORAGE_KEY) || 'null')
+  } catch {
+    window.sessionStorage.removeItem(DASHBOARD_FILTER_STORAGE_KEY)
+    return null
+  }
+}
+
+function persistDashboardFilters() {
+  if (restoringDashboardFilters) return
+  try {
+    window.sessionStorage.setItem(DASHBOARD_FILTER_STORAGE_KEY, JSON.stringify({
+      active_tab: activeTab.value,
+      project_id: projectId.value,
+      product_categories: [...productCategories.value],
+      task_group_id: taskGroupId.value,
+      date_range: dateRange.value ? [...dateRange.value] : null,
+      keyword_selection_ready: keywordSelectionReady.value,
+      keyword_filters: {
+        selected_keywords: [...(keywordFilters.value.selected_keywords || [])],
+        keyword: keywordFilters.value.keyword || '',
+      },
+      planting_filters: { ...plantingFilters.value },
+    }))
+  } catch {
+    // Keep the dashboard usable when browser storage is unavailable.
+  }
+}
+
+async function restoreDashboardFilters() {
+  const saved = readDashboardFilters()
+  restoringDashboardFilters = true
+  try {
+    await loadProjects(saved?.project_id)
+    await loadProductOptions()
+
+    const availableProducts = new Set(productOptions.value.map((item) => item.value))
+    const savedProducts = Array.isArray(saved?.product_categories) ? saved.product_categories : []
+    productCategories.value = savedProducts.filter((value) => availableProducts.has(value))
+    await loadTaskGroupOptions()
+
+    const availableTaskGroups = new Set(taskGroupOptions.value.map((item) => item.value))
+    taskGroupId.value = availableTaskGroups.has(saved?.task_group_id) ? saved.task_group_id : null
+    dateRange.value = Array.isArray(saved?.date_range) && saved.date_range.length === 2 ? [...saved.date_range] : null
+    activeTab.value = DASHBOARD_TABS.has(saved?.active_tab) ? saved.active_tab : 'combined'
+    keywordSelectionReady.value = Boolean(saved?.keyword_selection_ready)
+    keywordFilters.value = {
+      selected_keywords: Array.isArray(saved?.keyword_filters?.selected_keywords)
+        ? [...saved.keyword_filters.selected_keywords]
+        : [],
+      keyword: saved?.keyword_filters?.keyword || '',
+    }
+    plantingFilters.value = {
+      product_category: saved?.planting_filters?.product_category || null,
+      blogger_type: saved?.planting_filters?.blogger_type || null,
+      note_type: saved?.planting_filters?.note_type || null,
+      content_direction: saved?.planting_filters?.content_direction || null,
+      keyword: saved?.planting_filters?.keyword || '',
+    }
+  } finally {
+    restoringDashboardFilters = false
+  }
+  persistDashboardFilters()
+}
 
 function defaultXiaohongxing() {
   return {
@@ -477,15 +559,16 @@ function defaultKpiProgress() {
   }
 }
 
-async function loadProjects() {
+async function loadProjects(preferredProjectId = null) {
   const res = await api.getRedbookProjects({ page: 1, page_size: 9999, status: 'active' })
   projectOptions.value = res.data.map((item) => ({
     label: `${item.project_name} (${item.project_code})`,
     value: item.id,
     period_name: item.project_period,
   }))
-  projectId.value = projectOptions.value[0]?.value || null
-  await loadProductOptions()
+  projectId.value = projectOptions.value.some((item) => item.value === preferredProjectId)
+    ? preferredProjectId
+    : (projectOptions.value[0]?.value || null)
 }
 
 async function loadProductOptions() {
@@ -505,12 +588,12 @@ async function loadProductOptions() {
 
 async function loadTaskGroupOptions() {
   taskGroupOptions.value = []
-  if (!projectId.value || !productCategory.value) return
+  if (!projectId.value || !productCategories.value.length) return
   taskGroupLoading.value = true
   try {
     const res = await api.getRedbookTaskGroupOptions({
       project_id: projectId.value,
-      product_category: productCategory.value,
+      product_categories: productCategories.value,
     })
     taskGroupOptions.value = (res.data || []).map((item) => ({
       label: item.task_name || item.label,
@@ -523,8 +606,9 @@ async function loadTaskGroupOptions() {
 
 function queryParams(extra = {}) {
   const params = { project_id: projectId.value, ...extra }
-  if (productCategory.value) {
-    params.product_category = productCategory.value
+  if (productCategories.value.length) {
+    delete params.product_category
+    params.product_categories = productCategories.value
   }
   if (taskGroupId.value) {
     params.task_id = taskGroupId.value
@@ -1581,9 +1665,11 @@ function breakdownMax(rows = []) {
         class="toolbar-project"
       />
       <NSelect
-        v-model:value="productCategory"
+        v-model:value="productCategories"
+        multiple
         filterable
         clearable
+        :max-tag-count="1"
         :loading="productLoading"
         :options="productOptions"
         placeholder="全部产品"
@@ -1593,10 +1679,10 @@ function breakdownMax(rows = []) {
         v-model:value="taskGroupId"
         filterable
         clearable
-        :disabled="!productCategory"
+        :disabled="!productCategories.length"
         :loading="taskGroupLoading"
         :options="taskGroupOptions"
-        :placeholder="productCategory ? '全部任务组' : '请先选择产品'"
+        :placeholder="productCategories.length ? '全部任务组' : '请先选择产品'"
         class="toolbar-task-group"
       />
       <NDatePicker
@@ -1852,9 +1938,9 @@ function breakdownMax(rows = []) {
           <NSelect
             v-model:value="plantingFilters.product_category"
             clearable
-            :disabled="!!productCategory"
+            :disabled="productCategories.length > 0"
             :options="plantingFilterOptions.product_category"
-            :placeholder="productCategory ? '已使用顶部产品筛选' : '产品'"
+            :placeholder="productCategories.length ? '已使用顶部产品筛选' : '产品'"
           />
           <NSelect v-model:value="plantingFilters.blogger_type" clearable :options="plantingFilterOptions.blogger_type" placeholder="达人类型" />
           <NSelect v-model:value="plantingFilters.note_type" clearable :options="plantingFilterOptions.note_type" placeholder="笔记类型" />

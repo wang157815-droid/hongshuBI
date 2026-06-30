@@ -3,6 +3,7 @@ from datetime import date
 from fastapi import APIRouter, Query
 from tortoise.expressions import Q
 
+from app.api.v1.redbook.dashboards import merge_product_filters
 from app.models.redbook import RedbookKpiConfig
 from app.redbook.services.kpi_service import (
     calculate_kpi_progress,
@@ -127,18 +128,20 @@ async def progress(
     date_start: date | None = Query(None),
     date_end: date | None = Query(None),
     product_category: str = Query(""),
+    product_categories: list[str] | None = Query(None),
     task_id: str = Query(""),
     selected_keywords: str = Query(""),
     keyword: str = Query(""),
     use_default_keywords: bool = Query(False),
 ):
+    product_filter = merge_product_filters(product_category, product_categories)
     return Success(
         data=await calculate_kpi_progress(
             project_id=project_id,
             period_name=period_name,
             date_start=date_start,
             date_end=date_end,
-            product_category=product_category,
+            product_category=product_filter,
             task_id=task_id,
             selected_keywords=selected_keywords,
             keyword=keyword,
