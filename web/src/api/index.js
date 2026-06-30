@@ -57,6 +57,7 @@ export default {
   getRedbookUnmatchedNotes: (params = {}) => request.get('/redbook/files/unmatched-notes', { params }),
   getRedbookUnmatchedOrders: (params = {}) => request.get('/redbook/files/unmatched-orders', { params }),
   // redbook mappings
+  getRedbookMappingOptions: (params = {}) => request.get('/redbook/mappings/options', { params }),
   getRedbookNoteMappings: (params = {}) => request.get('/redbook/mappings/notes/list', { params }),
   createRedbookNoteMapping: (data = {}) => request.post('/redbook/mappings/notes/create', data),
   updateRedbookNoteMapping: (data = {}) => request.post('/redbook/mappings/notes/update', data),
@@ -71,6 +72,8 @@ export default {
   rebuildRedbookFacts: (data = {}) => request.post('/redbook/rebuild/facts', data),
   rebuildRedbookMarts: (data = {}) => request.post('/redbook/rebuild/marts', data),
   rebuildRedbookAll: (data = {}) => request.post('/redbook/rebuild/all', data),
+  getRedbookProductOptions: (params = {}) => request.get('/redbook/dashboards/product-options', { params }),
+  getRedbookTaskGroupOptions: (params = {}) => request.get('/redbook/dashboards/task-group-options', { params }),
   getRedbookDashboardOverview: (params = {}) => request.get('/redbook/dashboards/overview', { params }),
   getRedbookXiaohongxingDashboard: (params = {}) => request.get('/redbook/dashboards/xiaohongxing', { params }),
   getRedbookKeywordSearchDashboard: (params = {}) => request.get('/redbook/dashboards/keyword-search', { params }),

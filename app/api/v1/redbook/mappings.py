@@ -15,6 +15,39 @@ async def refresh_mapping_outputs(project_id: int):
     await rebuild_redbook_facts(project_id)
 
 
+def clean_option_value(value):
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def build_select_options(values):
+    cleaned = sorted({clean_option_value(value) for value in values if clean_option_value(value)})
+    return [{"label": value, "value": value} for value in cleaned]
+
+
+@router.get("/options", summary="Redbook mapping form options")
+async def mapping_form_options(project_id: int = Query(...)):
+    blogger_types = await (
+        RedbookNoteMapping.filter(project_id=project_id)
+        .exclude(blogger_type=None)
+        .distinct()
+        .values_list("blogger_type", flat=True)
+    )
+    product_categories = await (
+        RedbookRawPgy.filter(project_id=project_id)
+        .exclude(spu_name=None)
+        .distinct()
+        .values_list("spu_name", flat=True)
+    )
+    return Success(
+        data={
+            "blogger_type": build_select_options(blogger_types),
+            "product_category": build_select_options(product_categories),
+        }
+    )
+
+
 @router.get("/notes/list", summary="Redbook note mapping list")
 async def list_note_mappings(
     page: int = Query(1),

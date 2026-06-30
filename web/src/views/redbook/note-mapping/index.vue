@@ -16,6 +16,11 @@ const $table = ref(null)
 const formRef = ref(null)
 const queryItems = ref({})
 const projectOptions = ref([])
+const mappingOptions = ref({
+  blogger_type: [],
+  product_category: [],
+})
+const mappingOptionsLoading = ref(false)
 const modalVisible = ref(false)
 const modalTitle = ref('')
 const saving = ref(false)
@@ -111,13 +116,40 @@ async function loadProjects() {
   }))
 }
 
-function openCreate() {
+function mergeCurrentOption(options = [], value) {
+  if (!value || options.some((item) => item.value === value)) return options
+  return [{ label: value, value }, ...options]
+}
+
+async function loadMappingOptions(projectId, current = {}) {
+  mappingOptions.value = { blogger_type: [], product_category: [] }
+  if (!projectId) return
+  mappingOptionsLoading.value = true
+  try {
+    const res = await api.getRedbookMappingOptions({ project_id: projectId })
+    mappingOptions.value = {
+      blogger_type: mergeCurrentOption(res.data?.blogger_type || [], current.blogger_type),
+      product_category: mergeCurrentOption(res.data?.product_category || [], current.product_category),
+    }
+  } finally {
+    mappingOptionsLoading.value = false
+  }
+}
+
+async function handleFormProjectChange(projectId) {
+  form.value.blogger_type = ''
+  form.value.product_category = ''
+  await loadMappingOptions(projectId)
+}
+
+async function openCreate() {
   form.value = { ...getDefaultForm(), project_id: queryItems.value.project_id || null }
   modalTitle.value = '新建笔记'
   modalVisible.value = true
+  await loadMappingOptions(form.value.project_id)
 }
 
-function openEdit(row) {
+async function openEdit(row) {
   form.value = {
     id: row.id,
     project_id: row.project_id,
@@ -132,6 +164,7 @@ function openEdit(row) {
     publish_date: row.publish_date,
     status: row.status || 'active',
   }
+  await loadMappingOptions(row.project_id, row)
   modalTitle.value = '编辑笔记'
   modalVisible.value = true
 }
@@ -200,7 +233,12 @@ async function handleDelete(id) {
       <NForm ref="formRef" :model="form" :rules="rules" label-placement="left" label-width="90">
         <NGrid :cols="2" :x-gap="16">
           <NFormItemGi label="项目" path="project_id">
-            <NSelect v-model:value="form.project_id" filterable :options="projectOptions" />
+            <NSelect
+              v-model:value="form.project_id"
+              filterable
+              :options="projectOptions"
+              @update:value="handleFormProjectChange"
+            />
           </NFormItemGi>
           <NFormItemGi label="note_id" path="note_id">
             <NInput v-model:value="form.note_id" placeholder="笔记 ID" />
@@ -209,7 +247,15 @@ async function handleDelete(id) {
             <NInput v-model:value="form.blogger_name" />
           </NFormItemGi>
           <NFormItemGi label="达人分类" path="blogger_type">
-            <NInput v-model:value="form.blogger_type" />
+            <NSelect
+              v-model:value="form.blogger_type"
+              filterable
+              clearable
+              tag
+              :loading="mappingOptionsLoading"
+              :options="mappingOptions.blogger_type"
+              placeholder="请选择达人分类"
+            />
           </NFormItemGi>
           <NFormItemGi label="笔记类型" path="note_type">
             <NInput v-model:value="form.note_type" />
@@ -221,7 +267,15 @@ async function handleDelete(id) {
             <NInput v-model:value="form.product_name" />
           </NFormItemGi>
           <NFormItemGi label="产品分类" path="product_category">
-            <NInput v-model:value="form.product_category" />
+            <NSelect
+              v-model:value="form.product_category"
+              filterable
+              clearable
+              tag
+              :loading="mappingOptionsLoading"
+              :options="mappingOptions.product_category"
+              placeholder="请选择蒲公英SPU"
+            />
           </NFormItemGi>
           <NFormItemGi label="内容方向" path="content_direction">
             <NInput v-model:value="form.content_direction" />

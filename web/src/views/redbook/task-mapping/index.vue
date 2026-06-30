@@ -21,6 +21,11 @@ const modalTitle = ref('')
 const saving = ref(false)
 const taskIdOptions = ref([])
 const taskIdOptionsLoading = ref(false)
+const mappingOptions = ref({
+  blogger_type: [],
+  product_category: [],
+})
+const mappingOptionsLoading = ref(false)
 const form = ref(getDefaultForm())
 
 const rules = {
@@ -112,6 +117,26 @@ async function loadProjects() {
   }))
 }
 
+function mergeCurrentOption(options = [], value) {
+  if (!value || options.some((item) => item.value === value)) return options
+  return [{ label: value, value }, ...options]
+}
+
+async function loadMappingOptions(projectId, current = {}) {
+  mappingOptions.value = { blogger_type: [], product_category: [] }
+  if (!projectId) return
+  mappingOptionsLoading.value = true
+  try {
+    const res = await api.getRedbookMappingOptions({ project_id: projectId })
+    mappingOptions.value = {
+      blogger_type: mergeCurrentOption(res.data?.blogger_type || [], current.blogger_type),
+      product_category: mergeCurrentOption(res.data?.product_category || [], current.product_category),
+    }
+  } finally {
+    mappingOptionsLoading.value = false
+  }
+}
+
 async function loadPgyTaskOptions(projectId, currentTaskId = '') {
   if (!projectId) {
     taskIdOptions.value = []
@@ -125,6 +150,7 @@ async function loadPgyTaskOptions(projectId, currentTaskId = '') {
       value: item.value || item.task_id,
       task_name: item.task_name,
       product_name: item.product_name,
+      product_category: item.product_category || item.product_name,
     }))
     if (currentTaskId && !options.some((item) => item.value === currentTaskId)) {
       options.unshift({
@@ -132,6 +158,7 @@ async function loadPgyTaskOptions(projectId, currentTaskId = '') {
         value: currentTaskId,
         task_name: form.value.task_name,
         product_name: form.value.product_name,
+        product_category: form.value.product_category,
       })
     }
     taskIdOptions.value = options
@@ -143,7 +170,10 @@ async function loadPgyTaskOptions(projectId, currentTaskId = '') {
 async function handleFormProjectChange(projectId) {
   form.value.task_id = ''
   form.value.task_name = ''
-  await loadPgyTaskOptions(projectId)
+  form.value.product_name = ''
+  form.value.product_category = ''
+  form.value.blogger_type = ''
+  await Promise.all([loadPgyTaskOptions(projectId), loadMappingOptions(projectId)])
 }
 
 function handleTaskIdChange(taskId) {
@@ -157,13 +187,16 @@ function handleTaskIdChange(taskId) {
   if (!form.value.product_name && selected.product_name) {
     form.value.product_name = selected.product_name
   }
+  if (!form.value.product_category && selected.product_category) {
+    form.value.product_category = selected.product_category
+  }
 }
 
 async function openCreate() {
   form.value = { ...getDefaultForm(), project_id: queryItems.value.project_id || null }
   modalTitle.value = '新建任务组'
   modalVisible.value = true
-  await loadPgyTaskOptions(form.value.project_id)
+  await Promise.all([loadPgyTaskOptions(form.value.project_id), loadMappingOptions(form.value.project_id)])
 }
 
 async function openEdit(row) {
@@ -182,7 +215,7 @@ async function openEdit(row) {
   }
   modalTitle.value = '编辑任务组'
   modalVisible.value = true
-  await loadPgyTaskOptions(row.project_id, row.task_id)
+  await Promise.all([loadPgyTaskOptions(row.project_id, row.task_id), loadMappingOptions(row.project_id, row)])
 }
 
 async function handleSave() {
@@ -283,10 +316,26 @@ async function handleDelete(id) {
             <NInput v-model:value="form.product_name" />
           </NFormItemGi>
           <NFormItemGi label="产品分类" path="product_category">
-            <NInput v-model:value="form.product_category" />
+            <NSelect
+              v-model:value="form.product_category"
+              filterable
+              clearable
+              tag
+              :loading="mappingOptionsLoading"
+              :options="mappingOptions.product_category"
+              placeholder="请选择蒲公英SPU"
+            />
           </NFormItemGi>
           <NFormItemGi label="达人分类" path="blogger_type">
-            <NInput v-model:value="form.blogger_type" />
+            <NSelect
+              v-model:value="form.blogger_type"
+              filterable
+              clearable
+              tag
+              :loading="mappingOptionsLoading"
+              :options="mappingOptions.blogger_type"
+              placeholder="请选择达人分类"
+            />
           </NFormItemGi>
           <NFormItemGi label="状态" path="status">
             <NSelect

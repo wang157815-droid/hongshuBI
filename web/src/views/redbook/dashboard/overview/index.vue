@@ -12,6 +12,12 @@ defineOptions({ name: 'RedbookDashboardOverview' })
 const activeTab = ref('combined')
 const projectOptions = ref([])
 const projectId = ref(null)
+const productOptions = ref([])
+const productCategory = ref(null)
+const productLoading = ref(false)
+const taskGroupOptions = ref([])
+const taskGroupId = ref(null)
+const taskGroupLoading = ref(false)
 const dateRange = ref(null)
 const loading = ref(false)
 const rebuilding = ref(false)
@@ -398,8 +404,17 @@ onMounted(async () => {
 })
 
 watch(projectId, () => {
+  productCategory.value = null
+  taskGroupId.value = null
+  taskGroupOptions.value = []
+  loadProductOptions()
   keywordSelectionReady.value = false
   keywordFilters.value.selected_keywords = []
+})
+
+watch(productCategory, () => {
+  taskGroupId.value = null
+  loadTaskGroupOptions()
 })
 
 function defaultXiaohongxing() {
@@ -470,10 +485,50 @@ async function loadProjects() {
     period_name: item.project_period,
   }))
   projectId.value = projectOptions.value[0]?.value || null
+  await loadProductOptions()
+}
+
+async function loadProductOptions() {
+  productOptions.value = []
+  if (!projectId.value) return
+  productLoading.value = true
+  try {
+    const res = await api.getRedbookProductOptions({ project_id: projectId.value })
+    productOptions.value = (res.data || []).map((item) => ({
+      label: item.label,
+      value: item.value,
+    }))
+  } finally {
+    productLoading.value = false
+  }
+}
+
+async function loadTaskGroupOptions() {
+  taskGroupOptions.value = []
+  if (!projectId.value || !productCategory.value) return
+  taskGroupLoading.value = true
+  try {
+    const res = await api.getRedbookTaskGroupOptions({
+      project_id: projectId.value,
+      product_category: productCategory.value,
+    })
+    taskGroupOptions.value = (res.data || []).map((item) => ({
+      label: item.task_name || item.label,
+      value: item.task_id || item.value,
+    }))
+  } finally {
+    taskGroupLoading.value = false
+  }
 }
 
 function queryParams(extra = {}) {
   const params = { project_id: projectId.value, ...extra }
+  if (productCategory.value) {
+    params.product_category = productCategory.value
+  }
+  if (taskGroupId.value) {
+    params.task_id = taskGroupId.value
+  }
   if (dateRange.value?.length === 2) {
     params.date_start = dateRange.value[0]
     params.date_end = dateRange.value[1]
@@ -881,12 +936,22 @@ function buildAdVolumeSummary(rows = [], mode) {
   const volume = sumMetric(rows, mode.volumeKey)
   const unitCost = safeRatio(adCost, volume)
   const peak = rows.reduce((current, row) => (toNumber(row[mode.volumeKey]) > toNumber(current?.[mode.volumeKey]) ? row : current), null)
-  return [
+  const summary = [
     { label: '投流消耗', value: formatMoney(adCost), sub: `${rows.length} 天` },
     { label: mode.volumeLabel, value: formatNumber(volume), sub: '当前筛选汇总' },
+  ]
+  if (mode.value === 'clicks') {
+    summary.push({
+      label: '点击率',
+      value: formatPercent(safeRatio(volume, sumMetric(rows, 'impressions')), 2),
+      sub: '点击量 / 曝光量',
+    })
+  }
+  summary.push(
     { label: mode.unitCostLabel, value: formatMoney(unitCost), sub: `${mode.label}成本` },
     { label: '峰值日期', value: peak?.stat_date || '-', sub: peak ? formatNumber(peak[mode.volumeKey]) : '-' },
-  ]
+  )
+  return summary
 }
 
 function buildAdVolumeChart(rows = [], mode) {
@@ -1515,6 +1580,25 @@ function breakdownMax(rows = []) {
         placeholder="选择项目"
         class="toolbar-project"
       />
+      <NSelect
+        v-model:value="productCategory"
+        filterable
+        clearable
+        :loading="productLoading"
+        :options="productOptions"
+        placeholder="全部产品"
+        class="toolbar-product"
+      />
+      <NSelect
+        v-model:value="taskGroupId"
+        filterable
+        clearable
+        :disabled="!productCategory"
+        :loading="taskGroupLoading"
+        :options="taskGroupOptions"
+        :placeholder="productCategory ? '全部任务组' : '请先选择产品'"
+        class="toolbar-task-group"
+      />
       <NDatePicker
         v-model:formatted-value="dateRange"
         type="daterange"
@@ -1765,7 +1849,13 @@ function breakdownMax(rows = []) {
 
       <NTabPane name="planting" tab="种草投流">
         <div class="filter-strip">
-          <NSelect v-model:value="plantingFilters.product_category" clearable :options="plantingFilterOptions.product_category" placeholder="产品" />
+          <NSelect
+            v-model:value="plantingFilters.product_category"
+            clearable
+            :disabled="!!productCategory"
+            :options="plantingFilterOptions.product_category"
+            :placeholder="productCategory ? '已使用顶部产品筛选' : '产品'"
+          />
           <NSelect v-model:value="plantingFilters.blogger_type" clearable :options="plantingFilterOptions.blogger_type" placeholder="达人类型" />
           <NSelect v-model:value="plantingFilters.note_type" clearable :options="plantingFilterOptions.note_type" placeholder="笔记类型" />
           <NSelect v-model:value="plantingFilters.content_direction" clearable :options="plantingFilterOptions.content_direction" placeholder="内容方向" />
@@ -2265,6 +2355,14 @@ function breakdownMax(rows = []) {
 
 .toolbar-project {
   width: 320px;
+}
+
+.toolbar-product {
+  width: 220px;
+}
+
+.toolbar-task-group {
+  width: 220px;
 }
 
 .toolbar-date {
@@ -2992,7 +3090,7 @@ function breakdownMax(rows = []) {
 
 .ad-volume-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
   margin-bottom: 12px;
 }

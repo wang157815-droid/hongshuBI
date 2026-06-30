@@ -200,8 +200,33 @@ def context_for_note(note_id, mappings, pgy_latest, fact_contexts):
     }
 
 
+def as_product_filter_set(product_filter):
+    if not product_filter:
+        return set()
+    if isinstance(product_filter, str):
+        values = [product_filter]
+    else:
+        values = product_filter
+    return {normalized_option(value) for value in values if normalized_option(value)}
+
+
+def product_matches(value, product_filter):
+    candidate = normalized_option(value)
+    product_values = as_product_filter_set(product_filter)
+    if not product_values:
+        return True
+    return candidate in product_values
+
+
+def context_matches_product(ctx, product_filter):
+    product_values = as_product_filter_set(product_filter)
+    if not product_values:
+        return True
+    return product_matches(ctx.get("product_category"), product_values)
+
+
 def matches_filters(ctx, product_category, blogger_type, note_type, content_direction, keyword):
-    if product_category and ctx["product_category"] != product_category:
+    if not context_matches_product(ctx, product_category):
         return False
     if blogger_type and ctx["blogger_type"] != blogger_type:
         return False
@@ -219,6 +244,97 @@ def matches_filters(ctx, product_category, blogger_type, note_type, content_dire
 
 def option_values(contexts, key):
     return sorted({ctx[key] for ctx in contexts if ctx.get(key)})
+
+
+def normalized_option(value):
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def add_product_option(options, value, source):
+    label = normalized_option(value)
+    if label:
+        options[label].add(source)
+
+
+async def resolve_product_filter_values(project_id: int, product_category: str):
+    selected = normalized_option(product_category)
+    if not selected:
+        return set()
+
+    pgy_rows = await RedbookRawPgy.filter(project_id=project_id).values("spu_name", "note_id")
+    note_mapping_rows = await RedbookNoteMapping.filter(project_id=project_id).values("product_category", "note_id")
+    values = {selected}
+    related_note_ids = {
+        normalized_option(row.get("note_id"))
+        for row in pgy_rows
+        if normalized_option(row.get("spu_name")) == selected and normalized_option(row.get("note_id"))
+    }
+    related_note_ids.update(
+        normalized_option(row.get("note_id"))
+        for row in note_mapping_rows
+        if normalized_option(row.get("product_category")) == selected and normalized_option(row.get("note_id"))
+    )
+    for row in pgy_rows:
+        if normalized_option(row.get("note_id")) in related_note_ids:
+            value = normalized_option(row.get("spu_name"))
+            if value:
+                values.add(value)
+    for row in note_mapping_rows:
+        if normalized_option(row.get("note_id")) in related_note_ids:
+            value = normalized_option(row.get("product_category"))
+            if value:
+                values.add(value)
+
+    return values
+
+
+async def resolve_task_filter_context(project_id: int, task_id: str):
+    selected = normalized_option(task_id)
+    context = {"task_id": selected, "order_ids": set(), "note_ids": set()}
+    if not selected:
+        return context
+
+    mapping_rows = await RedbookTaskMapping.filter(project_id=project_id, task_id=selected).values("order_id")
+    context["order_ids"] = {
+        normalized_option(row.get("order_id")) for row in mapping_rows if normalized_option(row.get("order_id"))
+    }
+
+    pgy_rows = await RedbookRawPgy.filter(project_id=project_id, task_id=selected).values("note_id", "order_id")
+    for row in pgy_rows:
+        note_id = normalized_option(row.get("note_id"))
+        order_id = normalized_option(row.get("order_id"))
+        if note_id:
+            context["note_ids"].add(note_id)
+        if order_id:
+            context["order_ids"].add(order_id)
+
+    bridge_rows = await RedbookTaskNoteBridge.filter(project_id=project_id, task_id=selected).values(
+        "note_id", "order_id"
+    )
+    if context["order_ids"]:
+        bridge_rows.extend(
+            await RedbookTaskNoteBridge.filter(
+                project_id=project_id,
+                order_id__in=context["order_ids"],
+            ).values("note_id", "order_id")
+        )
+    for row in bridge_rows:
+        note_id = normalized_option(row.get("note_id"))
+        order_id = normalized_option(row.get("order_id"))
+        if note_id:
+            context["note_ids"].add(note_id)
+        if order_id:
+            context["order_ids"].add(order_id)
+    return context
+
+
+def task_row_matches(task_id, order_id, task_filter):
+    selected = task_filter.get("task_id") if task_filter else ""
+    if not selected:
+        return True
+    return normalized_option(task_id) == selected or normalized_option(order_id) in task_filter["order_ids"]
 
 
 def fee_date_for_note(ctx, pgy):
@@ -269,7 +385,11 @@ async def build_planting_dashboard(
     note_type: str,
     content_direction: str,
     keyword: str,
+    task_id: str = "",
 ):
+    await ensure_dashboard_data(project_id, date_start, date_end, RedbookFactNoteDaily)
+    product_filter = await resolve_product_filter_values(project_id, product_category)
+    task_filter = await resolve_task_filter_context(project_id, task_id)
     fact_query = apply_date_range(RedbookFactNoteDaily.filter(project_id=project_id), date_start, date_end)
     fact_rows = await fact_query.order_by("stat_date", "note_id")
     mappings = {item.note_id: item for item in await RedbookNoteMapping.filter(project_id=project_id)}
@@ -290,8 +410,10 @@ async def build_planting_dashboard(
     for row in fact_rows:
         if not row.note_id:
             continue
+        if task_filter["task_id"] and normalized_option(row.note_id) not in task_filter["note_ids"]:
+            continue
         ctx = context_for_note(row.note_id, mappings, pgy_latest, fact_contexts)
-        if not matches_filters(ctx, product_category, blogger_type, note_type, content_direction, keyword):
+        if not matches_filters(ctx, product_filter, blogger_type, note_type, content_direction, keyword):
             continue
         active_note_ids.add(row.note_id)
         note_metrics.setdefault(row.note_id, blank_metrics())
@@ -300,8 +422,10 @@ async def build_planting_dashboard(
             add_ad_metrics(daily_metrics[row.stat_date], row)
 
     for note_id, pgy in pgy_latest.items():
+        if task_filter["task_id"] and normalized_option(note_id) not in task_filter["note_ids"]:
+            continue
         ctx = context_for_note(note_id, mappings, pgy_latest, fact_contexts)
-        if not matches_filters(ctx, product_category, blogger_type, note_type, content_direction, keyword):
+        if not matches_filters(ctx, product_filter, blogger_type, note_type, content_direction, keyword):
             continue
         pgy_fee_date = fee_date_for_note(ctx, pgy)
         should_include_pgy = note_id in active_note_ids or in_date_range(pgy_fee_date, date_start, date_end)
@@ -509,6 +633,225 @@ def xiaohongxing_daily_row(row):
         "new_customer_deal_rate": div(row.task_new_customer_deal_uv, row.task_deal_uv),
         "roi": row.roi,
     }
+
+
+def blank_xiaohongxing_daily(stat_date):
+    return {
+        "stat_date": stat_date,
+        "note_fee": Decimal("0"),
+        "service_fee": Decimal("0"),
+        "ad_cost": Decimal("0"),
+        "total_cost": Decimal("0"),
+        "total_cost_with_service": Decimal("0"),
+        "content_exposure": 0,
+        "pgy_read_count": 0,
+        "pgy_interaction_count": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "interactions": 0,
+        "search_component_clicks": 0,
+        "read_play_uv": 0,
+        "like_uv": 0,
+        "collect_uv": 0,
+        "comment_uv": 0,
+        "share_uv": 0,
+        "interaction_uv": 0,
+        "search_exposure_uv": 0,
+        "search_visit_uv": 0,
+        "shop_visit_uv": 0,
+        "new_customer_visit_uv": 0,
+        "product_collect_uv": 0,
+        "product_cart_uv": 0,
+        "collect_cart_uv": 0,
+        "shop_follow_uv": 0,
+        "shop_member_uv": 0,
+        "deal_uv": 0,
+        "new_customer_deal_uv": 0,
+        "merchant_gmv": Decimal("0"),
+        "order_product_gmv": Decimal("0"),
+        "non_order_product_gmv": Decimal("0"),
+        "order_product_new_customer_gmv": Decimal("0"),
+        "presale_deposit_gmv": Decimal("0"),
+        "presale_estimated_gmv": Decimal("0"),
+        "presale_deposit_uv": 0,
+    }
+
+
+def finalize_xiaohongxing_daily(row):
+    row["total_cost"] = dec(row["note_fee"]) + dec(row["ad_cost"])
+    row["total_cost_with_service"] = row["total_cost"] + dec(row["service_fee"])
+    row["collect_cart_uv"] = int(row["product_collect_uv"] or 0) + int(row["product_cart_uv"] or 0)
+    row["ctr"] = div(row["clicks"], row["impressions"])
+    row["cpc"] = div(row["ad_cost"], row["clicks"])
+    row["cpm"] = div(row["ad_cost"], row["impressions"], Decimal("1000"))
+    row["cpe"] = div(row["ad_cost"], row["interactions"])
+    row["search_component_cost"] = div(row["ad_cost"], row["search_component_clicks"])
+    row["interaction_rate"] = div(row["interaction_uv"], row["read_play_uv"])
+    row["search_visit_rate"] = div(row["search_visit_uv"], row["search_exposure_uv"])
+    row["shop_visit_rate"] = div(row["shop_visit_uv"], row["read_play_uv"])
+    row["new_customer_visit_rate"] = div(row["new_customer_visit_uv"], row["shop_visit_uv"])
+    row["collect_cart_rate"] = div(row["collect_cart_uv"], row["shop_visit_uv"])
+    row["deal_conversion_rate"] = div(row["deal_uv"], row["shop_visit_uv"])
+    row["new_customer_deal_rate"] = div(row["new_customer_deal_uv"], row["deal_uv"])
+    row["roi"] = div(row["merchant_gmv"], row["total_cost"])
+    row["gmv_per_read_uv"] = div(row["merchant_gmv"], row["read_play_uv"])
+    return row
+
+
+def sum_daily_int(rows, field):
+    return sum(int(row.get(field) or 0) for row in rows)
+
+
+def sum_daily_dec(rows, field):
+    return sum(dec(row.get(field)) for row in rows)
+
+
+def xiaohongxing_summary_from_daily_rows(rows, planting_totals=None):
+    planting_totals = planting_totals or {}
+    note_fee = sum_daily_dec(rows, "note_fee")
+    service_fee = sum_daily_dec(rows, "service_fee")
+    ad_cost = sum_daily_dec(rows, "ad_cost")
+    total_cost = note_fee + ad_cost
+    impressions = sum_daily_int(rows, "impressions")
+    clicks = sum_daily_int(rows, "clicks")
+    interactions = sum_daily_int(rows, "interactions")
+    search_component_clicks = sum_daily_int(rows, "search_component_clicks")
+    read_play_uv = sum_daily_int(rows, "read_play_uv")
+    interaction_uv = sum_daily_int(rows, "interaction_uv")
+    search_exposure_uv = sum_daily_int(rows, "search_exposure_uv")
+    search_visit_uv = sum_daily_int(rows, "search_visit_uv")
+    shop_visit_uv = sum_daily_int(rows, "shop_visit_uv")
+    collect_cart_uv = sum_daily_int(rows, "collect_cart_uv")
+    deal_uv = sum_daily_int(rows, "deal_uv")
+    merchant_gmv = sum_daily_dec(rows, "merchant_gmv")
+    return {
+        "note_count": planting_totals.get("note_count", 0),
+        "blogger_count": planting_totals.get("blogger_count", 0),
+        "note_fee": note_fee,
+        "service_fee": service_fee,
+        "ad_cost": ad_cost,
+        "total_cost": total_cost,
+        "total_cost_with_service": total_cost + service_fee,
+        "content_exposure": sum_daily_int(rows, "content_exposure"),
+        "pgy_read_count": sum_daily_int(rows, "pgy_read_count"),
+        "pgy_interaction_count": sum_daily_int(rows, "pgy_interaction_count"),
+        "impressions": impressions,
+        "clicks": clicks,
+        "interactions": interactions,
+        "search_component_clicks": search_component_clicks,
+        "offsite_active_uv_30d": planting_totals.get("offsite_active_uv_30d", 0),
+        "read_play_uv": read_play_uv,
+        "like_uv": sum_daily_int(rows, "like_uv"),
+        "collect_uv": sum_daily_int(rows, "collect_uv"),
+        "comment_uv": sum_daily_int(rows, "comment_uv"),
+        "share_uv": sum_daily_int(rows, "share_uv"),
+        "interaction_uv": interaction_uv,
+        "search_exposure_uv": search_exposure_uv,
+        "search_visit_uv": search_visit_uv,
+        "shop_visit_uv": shop_visit_uv,
+        "new_customer_visit_uv": sum_daily_int(rows, "new_customer_visit_uv"),
+        "product_collect_uv": sum_daily_int(rows, "product_collect_uv"),
+        "product_cart_uv": sum_daily_int(rows, "product_cart_uv"),
+        "collect_cart_uv": collect_cart_uv,
+        "shop_follow_uv": sum_daily_int(rows, "shop_follow_uv"),
+        "shop_member_uv": sum_daily_int(rows, "shop_member_uv"),
+        "deal_uv": deal_uv,
+        "new_customer_deal_uv": sum_daily_int(rows, "new_customer_deal_uv"),
+        "merchant_gmv": merchant_gmv,
+        "order_product_gmv": sum_daily_dec(rows, "order_product_gmv"),
+        "non_order_product_gmv": sum_daily_dec(rows, "non_order_product_gmv"),
+        "order_product_new_customer_gmv": sum_daily_dec(rows, "order_product_new_customer_gmv"),
+        "presale_deposit_gmv": sum_daily_dec(rows, "presale_deposit_gmv"),
+        "presale_estimated_gmv": sum_daily_dec(rows, "presale_estimated_gmv"),
+        "presale_deposit_uv": sum_daily_int(rows, "presale_deposit_uv"),
+        "ctr": div(clicks, impressions),
+        "cpc": div(ad_cost, clicks),
+        "cpm": div(ad_cost, impressions, Decimal("1000")),
+        "cpe": div(ad_cost, interactions),
+        "search_component_cost": div(ad_cost, search_component_clicks),
+        "interaction_rate": div(interaction_uv, read_play_uv),
+        "search_visit_rate": div(search_visit_uv, search_exposure_uv),
+        "shop_visit_rate": div(shop_visit_uv, read_play_uv),
+        "collect_cart_rate": div(collect_cart_uv, shop_visit_uv),
+        "deal_conversion_rate": div(deal_uv, shop_visit_uv),
+        "roi": div(merchant_gmv, total_cost),
+        "gmv_per_read_uv": div(merchant_gmv, read_play_uv),
+    }
+
+
+async def build_filtered_xiaohongxing_daily_rows(project_id, date_start, date_end, product_category, task_id=""):
+    product_filter = await resolve_product_filter_values(project_id, product_category)
+    task_filter = await resolve_task_filter_context(project_id, task_id)
+    planting_dashboard = await build_planting_dashboard(
+        project_id=project_id,
+        date_start=date_start,
+        date_end=date_end,
+        product_category=product_category,
+        blogger_type="",
+        note_type="",
+        content_direction="",
+        keyword="",
+        task_id=task_id,
+    )
+    daily_rows = {}
+
+    def daily_for(stat_date):
+        if stat_date not in daily_rows:
+            daily_rows[stat_date] = blank_xiaohongxing_daily(stat_date)
+        return daily_rows[stat_date]
+
+    for row in planting_dashboard.get("trend") or []:
+        stat_date = row.get("stat_date")
+        if not stat_date:
+            continue
+        daily = daily_for(stat_date)
+        daily["note_fee"] += dec(row.get("note_fee"))
+        daily["service_fee"] += dec(row.get("service_fee"))
+        daily["ad_cost"] += dec(row.get("ad_cost"))
+        daily["content_exposure"] += int(row.get("pgy_exposure") or 0)
+        daily["pgy_read_count"] += int(row.get("pgy_read_count") or 0)
+        daily["pgy_interaction_count"] += int(row.get("pgy_interaction_count") or 0)
+        daily["impressions"] += int(row.get("impressions") or 0)
+        daily["clicks"] += int(row.get("clicks") or 0)
+        daily["interactions"] += int(row.get("interactions") or 0)
+        daily["search_component_clicks"] += int(row.get("search_component_clicks") or 0)
+
+    await ensure_dashboard_data(project_id, date_start, date_end, RedbookFactTaskDaily)
+    task_query = apply_date_range(RedbookFactTaskDaily.filter(project_id=project_id), date_start, date_end)
+    task_rows = await task_query.order_by("stat_date", "task_id", "order_id")
+    for row in task_rows:
+        if not row.stat_date:
+            continue
+        if not task_row_matches(row.task_id, row.order_id, task_filter):
+            continue
+        if not product_matches(row.product_category, product_filter):
+            continue
+        daily = daily_for(row.stat_date)
+        daily["read_play_uv"] += int(row.read_play_uv or 0)
+        daily["like_uv"] += int(row.like_uv or 0)
+        daily["collect_uv"] += int(row.collect_uv or 0)
+        daily["comment_uv"] += int(row.comment_uv or 0)
+        daily["share_uv"] += int(row.share_uv or 0)
+        daily["interaction_uv"] += int(row.interaction_uv or 0)
+        daily["search_exposure_uv"] += int(row.search_exposure_uv or 0)
+        daily["search_visit_uv"] += int(row.search_visit_uv or 0)
+        daily["shop_visit_uv"] += int(row.shop_visit_uv or 0)
+        daily["new_customer_visit_uv"] += int(row.new_customer_visit_uv or 0)
+        daily["product_collect_uv"] += int(row.product_collect_uv or 0)
+        daily["product_cart_uv"] += int(row.product_cart_uv or 0)
+        daily["shop_follow_uv"] += int(row.shop_follow_uv or 0)
+        daily["shop_member_uv"] += int(row.shop_member_uv or 0)
+        daily["deal_uv"] += int(row.deal_uv or 0)
+        daily["new_customer_deal_uv"] += int(row.new_customer_deal_uv or 0)
+        daily["presale_deposit_uv"] += int(row.presale_deposit_uv or 0)
+        daily["merchant_gmv"] += dec(row.merchant_gmv)
+        daily["order_product_gmv"] += dec(row.order_product_gmv)
+        daily["non_order_product_gmv"] += dec(row.non_order_product_gmv)
+        daily["order_product_new_customer_gmv"] += dec(row.order_product_new_customer_gmv)
+        daily["presale_deposit_gmv"] += dec(row.presale_deposit_gmv)
+        daily["presale_estimated_gmv"] += dec(row.presale_estimated_gmv)
+
+    return [finalize_xiaohongxing_daily(row) for _, row in sorted(daily_rows.items())], planting_dashboard
 
 
 async def build_source_status(project_id: int):
@@ -784,16 +1127,24 @@ async def build_keyword_search_dashboard(
     }
 
 
-async def build_task_groups(project_id: int, date_start: date | None, date_end: date | None):
-    task_rows = await apply_date_range(
-        RedbookFactTaskDaily.filter(project_id=project_id), date_start, date_end
-    ).order_by("task_id", "order_id")
+async def build_task_groups(
+    project_id: int,
+    date_start: date | None,
+    date_end: date | None,
+    product_category: str = "",
+    task_id: str = "",
+):
+    await ensure_dashboard_data(project_id, date_start, date_end, RedbookFactTaskDaily)
+    product_filter = await resolve_product_filter_values(project_id, product_category)
+    task_filter = await resolve_task_filter_context(project_id, task_id)
+    task_query = apply_date_range(RedbookFactTaskDaily.filter(project_id=project_id), date_start, date_end)
+    task_rows = await task_query.order_by("task_id", "order_id")
     mapping_rows = await RedbookTaskMapping.filter(project_id=project_id)
     mappings = {item.order_id: item for item in mapping_rows}
     mappings_by_task_id = {item.task_id: item for item in mapping_rows if item.task_id}
     groups = {}
 
-    def group_for(task_id, task_name=None, task_type=None, product_name=None, blogger_type=None):
+    def group_for(task_id, task_name=None, task_type=None, product_name=None, product_value=None, blogger_type=None):
         key = task_id or "__unmapped__"
         if key not in groups:
             groups[key] = {
@@ -801,6 +1152,7 @@ async def build_task_groups(project_id: int, date_start: date | None, date_end: 
                 "task_name": task_name or ("未归类" if key == "__unmapped__" else key),
                 "task_type": task_type,
                 "product_name": product_name,
+                "product_category": product_value or product_name,
                 "blogger_type": blogger_type,
                 "order_ids": set(),
                 "note_ids": set(),
@@ -810,7 +1162,18 @@ async def build_task_groups(project_id: int, date_start: date | None, date_end: 
         return groups[key]
 
     for row in task_rows:
-        group = group_for(row.task_id, row.task_name, row.task_type, row.product_name, row.blogger_type)
+        if not task_row_matches(row.task_id, row.order_id, task_filter):
+            continue
+        if not product_matches(row.product_category, product_filter):
+            continue
+        group = group_for(
+            row.task_id,
+            row.task_name,
+            row.task_type,
+            row.product_name,
+            row.product_category,
+            row.blogger_type,
+        )
         group["has_xiaohongxing_data"] = True
         if row.order_id:
             group["order_ids"].add(row.order_id)
@@ -820,7 +1183,12 @@ async def build_task_groups(project_id: int, date_start: date | None, date_end: 
         fee_date = pgy.publish_date or pgy.update_date
         if not in_date_range(fee_date, date_start, date_end):
             continue
+        if not task_row_matches(pgy.task_id, pgy.order_id, task_filter):
+            continue
         mapping = mappings_by_task_id.get(pgy.task_id)
+        pgy_product = (mapping.product_category if mapping else None) or pgy.spu_name
+        if not product_matches(pgy_product, product_filter):
+            continue
         if not pgy.task_id or pgy.task_id not in groups:
             continue
         group = group_for(
@@ -828,6 +1196,7 @@ async def build_task_groups(project_id: int, date_start: date | None, date_end: 
             mapping.task_name if mapping else pgy.cooperation_name,
             mapping.task_type if mapping else None,
             mapping.product_name if mapping else pgy.spu_name,
+            pgy_product,
             mapping.blogger_type if mapping else None,
         )
         if pgy.note_id:
@@ -844,9 +1213,20 @@ async def build_task_groups(project_id: int, date_start: date | None, date_end: 
         bridge = bridges.get(row.note_id)
         if not bridge:
             continue
+        if not task_row_matches(bridge.task_id, bridge.order_id, task_filter):
+            continue
         mapping = mappings.get(bridge.order_id) if bridge.order_id else None
+        bridge_product = (mapping.product_category if mapping else None) or row.product_category
+        if not product_matches(bridge_product, product_filter):
+            continue
         task_id = bridge.task_id or (mapping.task_id if mapping else None)
-        group = group_for(task_id, mapping.task_name if mapping else None, mapping.task_type if mapping else None)
+        group = group_for(
+            task_id,
+            mapping.task_name if mapping else None,
+            mapping.task_type if mapping else None,
+            mapping.product_name if mapping else row.product_name,
+            bridge_product,
+        )
         add_dec(group["metrics"], "ad_cost", dec(row.ad_cost) * dec(bridge.weight))
 
     payload = []
@@ -864,6 +1244,7 @@ async def build_task_groups(project_id: int, date_start: date | None, date_end: 
                 "task_name": item["task_name"],
                 "task_type": item["task_type"],
                 "product_name": item["product_name"],
+                "product_category": item["product_category"],
                 "blogger_type": item["blogger_type"],
                 "order_count": len(item["order_ids"]),
                 "note_count": note_count,
@@ -928,6 +1309,166 @@ async def load_xiaohongxing_mart_rows(project_id: int, date_start: date | None, 
     return rows
 
 
+async def build_product_options(project_id: int):
+    options = defaultdict(set)
+    pgy_rows = await RedbookRawPgy.filter(project_id=project_id).values("spu_name", "note_id")
+    pgy_products = sorted({normalized_option(row.get("spu_name")) for row in pgy_rows if normalized_option(row.get("spu_name"))})
+    pgy_products_by_note = defaultdict(set)
+    for row in pgy_rows:
+        note_id = normalized_option(row.get("note_id"))
+        product = normalized_option(row.get("spu_name"))
+        if note_id and product:
+            pgy_products_by_note[note_id].add(product)
+    for value in pgy_products:
+        add_product_option(options, value, "pgy")
+
+    mapping_rows = await RedbookNoteMapping.filter(project_id=project_id).values("product_category", "note_id")
+    mapping_products = set()
+    linked_pgy_products = defaultdict(set)
+    for row in mapping_rows:
+        product = normalized_option(row.get("product_category"))
+        if not product:
+            continue
+        mapping_products.add(product)
+        note_id = normalized_option(row.get("note_id"))
+        if note_id:
+            linked_pgy_products[product].update(pgy_products_by_note.get(note_id, set()))
+    for product in mapping_products:
+        linked_products = linked_pgy_products.get(product)
+        if linked_products:
+            for linked_product in linked_products:
+                add_product_option(options, linked_product, "note_mapping")
+        else:
+            add_product_option(options, product, "note_mapping")
+    return [
+        {"label": label, "value": label, "sources": sorted(sources)}
+        for label, sources in sorted(options.items(), key=lambda item: item[0])
+    ]
+
+
+async def build_task_group_options(project_id: int, product_category: str = ""):
+    await ensure_dashboard_data(project_id, None, None, RedbookFactTaskDaily)
+    selected_product = normalized_option(product_category)
+    product_filter = await resolve_product_filter_values(project_id, selected_product)
+    fact_rows = await RedbookFactTaskDaily.filter(project_id=project_id).values("task_id", "order_id")
+    fact_task_ids = {
+        normalized_option(row.get("task_id")) for row in fact_rows if normalized_option(row.get("task_id"))
+    }
+    fact_order_ids = {
+        normalized_option(row.get("order_id")) for row in fact_rows if normalized_option(row.get("order_id"))
+    }
+    mapping_rows = await RedbookTaskMapping.filter(project_id=project_id, status="active").values(
+        "task_id",
+        "task_name",
+        "order_id",
+        "product_category",
+        "product_name",
+    )
+    options = {}
+    for row in mapping_rows:
+        task_id = normalized_option(row.get("task_id"))
+        if not task_id:
+            continue
+        order_id = normalized_option(row.get("order_id"))
+        if task_id not in fact_task_ids and order_id not in fact_order_ids:
+            continue
+        if selected_product and not product_matches(row.get("product_category"), product_filter):
+            continue
+        task_name = normalized_option(row.get("task_name")) or task_id
+        current = options.get(task_id)
+        if not current or current["label"] == task_id:
+            options[task_id] = {
+                "label": task_name,
+                "value": task_id,
+                "task_id": task_id,
+                "task_name": task_name,
+            }
+    return sorted(options.values(), key=lambda item: (item["task_name"], item["task_id"]))
+
+
+def xiaohongxing_response_payload(summary, daily_rows, task_groups, source_status, missing_mappings, kpis):
+    return {
+        "summary": summary,
+        "cost_trend": [
+            {
+                "stat_date": row["stat_date"],
+                "note_fee": row["note_fee"],
+                "service_fee": row["service_fee"],
+                "ad_cost": row["ad_cost"],
+                "total_cost": row["total_cost"],
+            }
+            for row in daily_rows
+        ],
+        "search_trend": [
+            {
+                "stat_date": row["stat_date"],
+                "search_exposure_uv": row["search_exposure_uv"],
+                "search_visit_uv": row["search_visit_uv"],
+                "shop_visit_uv": row["shop_visit_uv"],
+                "search_component_clicks": row["search_component_clicks"],
+            }
+            for row in daily_rows
+        ],
+        "gmv_trend": [
+            {
+                "stat_date": row["stat_date"],
+                "merchant_gmv": row["merchant_gmv"],
+                "deal_uv": row["deal_uv"],
+                "roi": row["roi"],
+            }
+            for row in daily_rows
+        ],
+        "daily_rows": daily_rows,
+        "task_groups": task_groups,
+        "source_status": source_status,
+        "missing_mappings": missing_mappings,
+        "kpis": kpis,
+    }
+
+
+async def build_xiaohongxing_dashboard_payload(
+    project_id: int,
+    date_start: date | None,
+    date_end: date | None,
+    product_category: str = "",
+    task_id: str = "",
+):
+    if product_category or task_id:
+        daily_rows, planting_dashboard = await build_filtered_xiaohongxing_daily_rows(
+            project_id,
+            date_start,
+            date_end,
+            product_category,
+            task_id,
+        )
+        summary = xiaohongxing_summary_from_daily_rows(daily_rows, planting_dashboard.get("totals") or {})
+    else:
+        rows = await load_xiaohongxing_mart_rows(project_id, date_start, date_end)
+        summary = xiaohongxing_summary(rows)
+        daily_rows = [xiaohongxing_daily_row(row) for row in rows]
+    return xiaohongxing_response_payload(
+        summary=summary,
+        daily_rows=daily_rows,
+        task_groups=await build_task_groups(project_id, date_start, date_end, product_category, task_id),
+        source_status=await build_source_status(project_id),
+        missing_mappings=await build_missing_mappings(project_id, date_start, date_end),
+        kpis=await build_dashboard_kpis(project_id, summary),
+    )
+
+
+@router.get("/product-options", summary="Redbook dashboard product options")
+async def product_options(project_id: int = Query(...)):
+    return Success(data=await build_product_options(project_id))
+
+
+@router.get("/task-group-options", summary="Redbook dashboard task group options")
+async def task_group_options(
+    project_id: int = Query(...),
+    product_category: str = Query(""),
+):
+    return Success(data=await build_task_group_options(project_id, product_category))
+
+
 @router.get("/keyword-search", summary="Redbook keyword search dashboard")
 async def keyword_search_dashboard(
     project_id: int = Query(...),
@@ -954,53 +1495,48 @@ async def xiaohongxing_dashboard(
     project_id: int = Query(...),
     date_start: date | None = Query(None),
     date_end: date | None = Query(None),
+    product_category: str = Query(""),
+    task_id: str = Query(""),
 ):
-    rows = await load_xiaohongxing_mart_rows(project_id, date_start, date_end)
-    summary = xiaohongxing_summary(rows)
-    daily_rows = [xiaohongxing_daily_row(row) for row in rows]
     return Success(
-        data={
-            "summary": summary,
-            "cost_trend": [
-                {
-                    "stat_date": row["stat_date"],
-                    "note_fee": row["note_fee"],
-                    "service_fee": row["service_fee"],
-                    "ad_cost": row["ad_cost"],
-                    "total_cost": row["total_cost"],
-                }
-                for row in daily_rows
-            ],
-            "search_trend": [
-                {
-                    "stat_date": row["stat_date"],
-                    "search_exposure_uv": row["search_exposure_uv"],
-                    "search_visit_uv": row["search_visit_uv"],
-                    "shop_visit_uv": row["shop_visit_uv"],
-                    "search_component_clicks": row["search_component_clicks"],
-                }
-                for row in daily_rows
-            ],
-            "gmv_trend": [
-                {
-                    "stat_date": row["stat_date"],
-                    "merchant_gmv": row["merchant_gmv"],
-                    "deal_uv": row["deal_uv"],
-                    "roi": row["roi"],
-                }
-                for row in daily_rows
-            ],
-            "daily_rows": daily_rows,
-            "task_groups": await build_task_groups(project_id, date_start, date_end),
-            "source_status": await build_source_status(project_id),
-            "missing_mappings": await build_missing_mappings(project_id, date_start, date_end),
-            "kpis": await build_dashboard_kpis(project_id, summary),
-        }
+        data=await build_xiaohongxing_dashboard_payload(project_id, date_start, date_end, product_category, task_id)
     )
 
 
 @router.get("/overview", summary="Redbook dashboard overview")
-async def overview(project_id: int = Query(...), date_start: date | None = Query(None), date_end: date | None = Query(None)):
+async def overview(
+    project_id: int = Query(...),
+    date_start: date | None = Query(None),
+    date_end: date | None = Query(None),
+    product_category: str = Query(""),
+    task_id: str = Query(""),
+):
+    if product_category or task_id:
+        payload = await build_xiaohongxing_dashboard_payload(
+            project_id,
+            date_start,
+            date_end,
+            product_category,
+            task_id,
+        )
+        summary = payload["summary"]
+        totals = {
+            "note_count": summary["note_count"],
+            "blogger_count": summary["blogger_count"],
+            "note_fee": summary["note_fee"],
+            "service_fee": summary["service_fee"],
+            "ad_cost": summary["ad_cost"],
+            "total_cost": summary["total_cost"],
+            "impressions": summary["impressions"],
+            "clicks": summary["clicks"],
+            "interactions": summary["interactions"],
+            "search_component_clicks": summary["search_component_clicks"],
+            "task_shop_visit_uv": summary["shop_visit_uv"],
+            "task_deal_uv": summary["deal_uv"],
+            "task_merchant_gmv": summary["merchant_gmv"],
+        }
+        return Success(data={"totals": totals, "trend": payload["daily_rows"]})
+
     await ensure_dashboard_data(project_id, date_start, date_end, RedbookMartProjectDaily)
     rows = await apply_date_range(RedbookMartProjectDaily.filter(project_id=project_id), date_start, date_end).order_by("stat_date")
     totals = {
@@ -1031,6 +1567,7 @@ async def ads_efficiency(
     note_type: str = Query(""),
     content_direction: str = Query(""),
     keyword: str = Query(""),
+    task_id: str = Query(""),
 ):
     await ensure_dashboard_data(project_id, date_start, date_end, RedbookFactNoteDaily)
     return Success(
@@ -1043,6 +1580,7 @@ async def ads_efficiency(
             note_type=note_type,
             content_direction=content_direction,
             keyword=keyword,
+            task_id=task_id,
         )
     )
 

@@ -5,8 +5,7 @@ from typing import Any
 from app.api.v1.redbook.dashboards import (
     build_keyword_search_dashboard,
     build_planting_dashboard,
-    load_xiaohongxing_mart_rows,
-    xiaohongxing_summary,
+    build_xiaohongxing_dashboard_payload,
 )
 from app.models.redbook import RedbookKpiConfig, RedbookProject
 from app.redbook.services.fact_builder import dec, div
@@ -296,6 +295,8 @@ async def resolve_kpi_metric_values(
     project_id: int,
     date_start: date | None = None,
     date_end: date | None = None,
+    product_category: str = "",
+    task_id: str = "",
     selected_keywords: str = "",
     keyword: str = "",
     use_default_keywords: bool = False,
@@ -304,16 +305,23 @@ async def resolve_kpi_metric_values(
         project_id=project_id,
         date_start=date_start,
         date_end=date_end,
-        product_category="",
+        product_category=product_category,
         blogger_type="",
         note_type="",
         content_direction="",
         keyword="",
+        task_id=task_id,
     )
     planting_totals = planting_dashboard.get("totals") or {}
 
-    xhx_rows = await load_xiaohongxing_mart_rows(project_id, date_start, date_end)
-    xhx_summary = xiaohongxing_summary(xhx_rows)
+    xhx_dashboard = await build_xiaohongxing_dashboard_payload(
+        project_id=project_id,
+        date_start=date_start,
+        date_end=date_end,
+        product_category=product_category,
+        task_id=task_id,
+    )
+    xhx_summary = xhx_dashboard.get("summary") or {}
 
     keyword_dashboard = await build_keyword_search_dashboard(
         project_id=project_id,
@@ -419,6 +427,8 @@ async def calculate_kpi_progress(
     period_name: str | None = None,
     date_start: date | None = None,
     date_end: date | None = None,
+    product_category: str = "",
+    task_id: str = "",
     selected_keywords: str = "",
     keyword: str = "",
     use_default_keywords: bool = False,
@@ -451,6 +461,8 @@ async def calculate_kpi_progress(
         project_id=project_id,
         date_start=date_start,
         date_end=date_end,
+        product_category=product_category,
+        task_id=task_id,
         selected_keywords=selected_keywords,
         keyword=keyword,
         use_default_keywords=use_default_keywords,
